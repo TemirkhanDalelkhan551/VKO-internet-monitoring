@@ -1,0 +1,259 @@
+using VkoMonitoring.Agent.Core.Domain;
+using VkoMonitoring.Api.Configuration;
+using VkoMonitoring.Api.Health;
+using VkoMonitoring.Api.Models;
+using VkoMonitoring.Api.Persistence;
+using VkoMonitoring.Api.Security;
+using VkoMonitoring.Api.Services;
+using VkoMonitoring.Api.Validation;
+
+namespace VkoMonitoring.Agent.Tests;
+
+public sealed class ApiComponentsTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), $"vko-api-tests-{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task Repository_AddIfNotExists_IsIdempotentAndReadable()
+    {
+        var repository = new JsonFileMeasurementRepository(new MonitoringApiOptions
+        {
+            DataDirectory = _directory
+        });
+        var measurement = CreateMeasurement();
+
+        var firstAdd = await repository.AddIfNotExistsAsync(measurement, CancellationToken.None);
+        var secondAdd = await repository.AddIfNotExistsAsync(measurement, CancellationToken.None);
+        var recent = await repository.GetRecentAsync(10, CancellationToken.None);
+
+        Assert.True(firstAdd);
+        Assert.False(secondAdd);
+        Assert.Single(recent);
+        Assert.Equal(measurement, recent[0]);
+    }
+
+    [Fact]
+    public void TokenValidator_RejectsWrongTokenAndAcceptsConfiguredDevice()
+    {
+        var deviceId = Guid.NewGuid();
+        var schoolId = Guid.NewGuid();
+        var lineId = Guid.NewGuid();
+        var validator = new TokenValidator(new MonitoringApiOptions
+        {
+            AdminToken = "admin-secret",
+            DeviceTokens = new Dictionary<string, string>
+            {
+                [deviceId.ToString("D")] = "device-secret"
+            },
+            DeviceBindings = new Dictionary<string, DeviceBindingOptions>
+            {
+                [deviceId.ToString("D")] = new()
+                {
+                    SchoolId = schoolId,
+                    LineId = lineId
+                }
+            }
+        });
+
+        Assert.True(validator.IsDeviceAuthorized(schoolId, deviceId, lineId, "device-secret"));
+        Assert.False(validator.IsDeviceAuthorized(schoolId, deviceId, lineId, "wrong-secret"));
+        Assert.False(validator.IsDeviceAuthorized(Guid.NewGuid(), deviceId, lineId, "device-secret"));
+        Assert.False(validator.IsDeviceAuthorized(schoolId, deviceId, Guid.NewGuid(), "device-secret"));
+        Assert.True(validator.IsAdminAuthorized("admin-secret"));
+        Assert.False(validator.IsAdminAuthorized(null));
+    }
+
+    [Fact]
+    public void OptionsValidator_RequiresBindingForEveryDeviceToken()
+    {
+        var options = new MonitoringApiOptions
+        {
+            AdminToken = "admin-secret",
+            DeviceTokens = new Dictionary<string, string>
+            {
+                [Guid.NewGuid().ToString("D")] = "device-secret"
+            }
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MonitoringApiOptionsValidator.Validate(options, postgresConnectionString: null));
+
+        Assert.Contains("Device binding is missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OptionsValidator_AllowsDatabaseRegisteredDevicesWithoutConfigurationTokens()
+    {
+        var options = new MonitoringApiOptions
+        {
+            AdminToken = "admin-secret",
+            StorageProvider = "PostgreSql"
+        };
+
+        MonitoringApiOptionsValidator.Validate(
+            options,
+            "Host=localhost;Database=monitoring;Username=monitoring;Password=test");
+    }
+
+    [Fact]
+    public void DeviceTokenHasher_IsDeterministicAndDoesNotStorePlainToken()
+    {
+        const string token = "sensitive-device-token";
+
+        var first = DeviceTokenHasher.Hash(token);
+        var second = DeviceTokenHasher.Hash(token);
+
+        Assert.Equal(first, second);
+        Assert.Equal(32, first.Length);
+        Assert.DoesNotContain(token, Convert.ToHexString(first), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("CHANGE_ME_BEFORE_INSTALLATION", false)]
+    [InlineData("real-device-token", true)]
+    public void ConfigurationSecret_RejectsPlaceholderValues(string? value, bool expected)
+    {
+        Assert.Equal(expected, ConfigurationSecret.IsConfigured(value));
+    }
+
+    [Fact]
+    public void PostgreSqlSchema_IsEmbeddedAndContainsRequiredEntities()
+    {
+        const string resourceName = "VkoMonitoring.Api.Persistence.Sql.001_initial_schema.sql";
+        using var stream = typeof(PostgresDatabaseInitializer).Assembly.GetManifestResourceStream(resourceName);
+
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream);
+        var sql = reader.ReadToEnd();
+        Assert.Contains("CREATE TABLE IF NOT EXISTS schools", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS internet_lines", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS devices", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS measurements", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS device_activation_codes", sql, StringComparison.Ordinal);
+        Assert.Contains("threshold_download_mbps", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ActivationCodeProtector_GeneratesUserFriendlyCodeAndNormalizesInput()
+    {
+        var code = ActivationCodeProtector.Generate();
+
+        Assert.Matches("^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$", code);
+        Assert.True(ActivationCodeProtector.IsValidFormat(code));
+        Assert.Equal(
+            ActivationCodeProtector.Hash(code),
+            ActivationCodeProtector.Hash(code.ToLowerInvariant().Replace("-", " ", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void MeasurementValidator_RejectsInvalidIdentifiersAndMetrics()
+    {
+        var measurement = CreateMeasurement() with
+        {
+            DownloadMbps = -1,
+            PacketLossPercent = 101
+        };
+        measurement = measurement with { EventId = Guid.Empty };
+
+        var errors = MeasurementValidator.Validate(measurement);
+
+        Assert.Contains(nameof(measurement.EventId), errors.Keys);
+        Assert.Contains(nameof(measurement.DownloadMbps), errors.Keys);
+        Assert.Contains(nameof(measurement.PacketLossPercent), errors.Keys);
+    }
+
+    [Fact]
+    public void StatusEvaluator_UsesConfiguredThresholds()
+    {
+        var thresholds = new QualityThresholdOptions();
+        var normal = CreateMeasurement();
+        var unstable = normal with { DownloadMbps = 15 };
+        var critical = normal with { DownloadMbps = 5 };
+        var offline = normal with { ConnectionStatus = ConnectionStatus.Offline };
+
+        Assert.Equal(MonitoringStatus.Normal, MonitoringStatusEvaluator.Evaluate(normal, thresholds));
+        Assert.Equal(MonitoringStatus.Unstable, MonitoringStatusEvaluator.Evaluate(unstable, thresholds));
+        Assert.Equal(MonitoringStatus.Critical, MonitoringStatusEvaluator.Evaluate(critical, thresholds));
+        Assert.Equal(MonitoringStatus.NoConnection, MonitoringStatusEvaluator.Evaluate(offline, thresholds));
+    }
+
+    [Theory]
+    [InlineData(false, 1, ApiHealthStatus.Unavailable)]
+    [InlineData(true, 100, ApiHealthStatus.Healthy)]
+    [InlineData(true, 1_000, ApiHealthStatus.Degraded)]
+    public void HealthStatusEvaluator_ReportsDependencyState(
+        bool available,
+        int durationMilliseconds,
+        ApiHealthStatus expected)
+    {
+        var actual = HealthStatusEvaluator.Evaluate(
+            available,
+            TimeSpan.FromMilliseconds(durationMilliseconds),
+            TimeSpan.FromSeconds(1));
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public async Task JsonRepositories_RecordHeartbeatAndExposeActiveDevice()
+    {
+        var deviceId = Guid.NewGuid();
+        var schoolId = Guid.NewGuid();
+        var lineId = Guid.NewGuid();
+        var options = new MonitoringApiOptions
+        {
+            DataDirectory = _directory,
+            DeviceBindings = new Dictionary<string, DeviceBindingOptions>
+            {
+                [deviceId.ToString("D")] = new()
+                {
+                    SchoolId = schoolId,
+                    LineId = lineId,
+                    SchoolName = "School",
+                    DeviceName = "Monitoring point"
+                }
+            }
+        };
+        var presenceRepository = new JsonFileDevicePresenceRepository(options);
+        var heartbeat = new AgentHeartbeat(
+            schoolId,
+            deviceId,
+            lineId,
+            DateTimeOffset.UtcNow,
+            "1.2.3");
+
+        var recorded = await presenceRepository.RecordHeartbeatAsync(heartbeat, CancellationToken.None);
+        var schools = await new JsonFileMonitoringReadRepository(options, TimeProvider.System)
+            .GetSchoolsAsync(CancellationToken.None);
+
+        Assert.True(recorded);
+        var school = Assert.Single(schools);
+        Assert.Equal(1, school.DeviceCount);
+        Assert.Equal(1, school.ActiveDeviceCount);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory))
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+    }
+
+    private static InternetMeasurement CreateMeasurement() => new(
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        DateTimeOffset.UtcNow,
+        100,
+        50,
+        20,
+        5,
+        0,
+        ConnectionStatus.Online,
+        null,
+        "1.0.0");
+}

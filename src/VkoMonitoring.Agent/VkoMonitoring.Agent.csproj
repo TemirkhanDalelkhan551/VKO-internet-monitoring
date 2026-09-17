@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>..\..\assets\vko-monitoring.ico</ApplicationIcon>
+    <UserSecretsId>dotnet-VkoMonitoring.Agent-026a852e-6290-481f-83d6-a103e599bf1b</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VkoMonitoring.Agent.Core\VkoMonitoring.Agent.Core.csproj" />
+    <ProjectReference Include="..\VkoMonitoring.Agent.Infrastructure\VkoMonitoring.Agent.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
