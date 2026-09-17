@@ -57,6 +57,26 @@ public static class MonitoringApiOptionsValidator
             errors.Add("DeviceActiveWindowMinutes must be greater than zero.");
         }
 
+        if (options.Incidents.ConsecutiveProblemMeasurements is < 2 or > 20)
+        {
+            errors.Add("Incidents:ConsecutiveProblemMeasurements must be between 2 and 20.");
+        }
+
+        if (options.Incidents.ConsecutiveRecoveryMeasurements is < 1 or > 20)
+        {
+            errors.Add("Incidents:ConsecutiveRecoveryMeasurements must be between 1 and 20.");
+        }
+
+        if (options.Incidents.MinimumViolationMinutes is < 0 or > 1_440)
+        {
+            errors.Add("Incidents:MinimumViolationMinutes must be between 0 and 1440.");
+        }
+
+        if (options.Incidents.MaximumSignalsToEvaluate is < 20 or > 1_000)
+        {
+            errors.Add("Incidents:MaximumSignalsToEvaluate must be between 20 and 1000.");
+        }
+
         if (options.ReadinessDegradedAfterMilliseconds <= 0)
         {
             errors.Add("ReadinessDegradedAfterMilliseconds must be greater than zero.");

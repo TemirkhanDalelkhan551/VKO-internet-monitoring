@@ -102,3 +102,59 @@ CREATE INDEX IF NOT EXISTS ix_measurements_line_measured_at
 
 CREATE INDEX IF NOT EXISTS ix_devices_school_id ON devices(school_id);
 CREATE INDEX IF NOT EXISTS ix_devices_line_id ON devices(line_id);
+
+CREATE SEQUENCE IF NOT EXISTS incident_number_sequence START WITH 1;
+
+CREATE TABLE IF NOT EXISTS incidents (
+    id uuid PRIMARY KEY,
+    incident_number bigint NOT NULL DEFAULT nextval('incident_number_sequence') UNIQUE,
+    school_id uuid NOT NULL REFERENCES schools(id),
+    line_id uuid NOT NULL REFERENCES internet_lines(id),
+    source text NOT NULL,
+    problem_type text NOT NULL,
+    status text NOT NULL,
+    title text NOT NULL,
+    description text NOT NULL,
+    started_at_utc timestamptz NOT NULL,
+    detected_at_utc timestamptz NOT NULL,
+    sent_to_provider_at_utc timestamptz,
+    recovered_at_utc timestamptz,
+    closed_at_utc timestamptz,
+    latest_measurement_event_id uuid REFERENCES measurements(event_id),
+    assigned_to text,
+    created_at_utc timestamptz NOT NULL DEFAULT now(),
+    updated_at_utc timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_incidents_source CHECK (source IN ('Automatic', 'Manual')),
+    CONSTRAINT ck_incidents_status CHECK (
+        status IN ('New', 'SentToProvider', 'InProgress', 'WaitingForInformation', 'Resolved', 'Closed'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_incidents_one_open_per_line
+    ON incidents(line_id)
+    WHERE status NOT IN ('Resolved', 'Closed');
+
+CREATE INDEX IF NOT EXISTS ix_incidents_school_started_at
+    ON incidents(school_id, started_at_utc DESC);
+
+CREATE INDEX IF NOT EXISTS ix_incidents_status_started_at
+    ON incidents(status, started_at_utc DESC);
+
+CREATE TABLE IF NOT EXISTS incident_history (
+    id bigserial PRIMARY KEY,
+    incident_id uuid NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    occurred_at_utc timestamptz NOT NULL,
+    action text NOT NULL,
+    previous_status text,
+    new_status text,
+    comment text,
+    actor text,
+    CONSTRAINT ck_incident_history_previous_status CHECK (
+        previous_status IS NULL OR previous_status IN (
+            'New', 'SentToProvider', 'InProgress', 'WaitingForInformation', 'Resolved', 'Closed')),
+    CONSTRAINT ck_incident_history_new_status CHECK (
+        new_status IS NULL OR new_status IN (
+            'New', 'SentToProvider', 'InProgress', 'WaitingForInformation', 'Resolved', 'Closed'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_incident_history_incident_time
+    ON incident_history(incident_id, occurred_at_utc);

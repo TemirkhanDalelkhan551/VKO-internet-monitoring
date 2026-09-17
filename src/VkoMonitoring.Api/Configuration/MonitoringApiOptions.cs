@@ -10,9 +10,18 @@ public sealed class MonitoringApiOptions
     public Dictionary<string, string> DeviceTokens { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DeviceBindingOptions> DeviceBindings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public QualityThresholdOptions Thresholds { get; init; } = new();
+    public IncidentDetectionOptions Incidents { get; init; } = new();
     public int DeviceActiveWindowMinutes { get; init; } = 15;
     public int MaximumSpeedTestBytes { get; init; } = 20_000_000;
     public int ReadinessDegradedAfterMilliseconds { get; init; } = 1_000;
+}
+
+public sealed class IncidentDetectionOptions
+{
+    public int ConsecutiveProblemMeasurements { get; init; } = 2;
+    public int ConsecutiveRecoveryMeasurements { get; init; } = 2;
+    public int MinimumViolationMinutes { get; init; }
+    public int MaximumSignalsToEvaluate { get; init; } = 100;
 }
 
 public sealed class DeviceBindingOptions

@@ -5,6 +5,7 @@ using Npgsql;
 using VkoMonitoring.Agent.Core.Domain;
 using VkoMonitoring.Api.Configuration;
 using VkoMonitoring.Api.Health;
+using VkoMonitoring.Api.Models;
 using VkoMonitoring.Api.Persistence;
 using VkoMonitoring.Api.Security;
 using VkoMonitoring.Api.Validation;
@@ -50,6 +51,7 @@ if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreC
     builder.Services.AddSingleton<IDeviceAuthenticator, PostgresDeviceAuthenticator>();
     builder.Services.AddSingleton<IDeviceRegistrationRepository, PostgresDeviceRegistrationRepository>();
     builder.Services.AddSingleton<IDeviceActivationRepository, PostgresDeviceActivationRepository>();
+    builder.Services.AddSingleton<IIncidentRepository, PostgresIncidentRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, PostgresReadinessProbe>();
 }
 else
@@ -60,6 +62,7 @@ else
     builder.Services.AddSingleton<IDeviceAuthenticator, ConfigurationDeviceAuthenticator>();
     builder.Services.AddSingleton<IDeviceRegistrationRepository, UnsupportedDeviceRegistrationRepository>();
     builder.Services.AddSingleton<IDeviceActivationRepository, UnsupportedDeviceActivationRepository>();
+    builder.Services.AddSingleton<IIncidentRepository, UnsupportedIncidentRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, LocalStorageReadinessProbe>();
 }
 
@@ -367,6 +370,7 @@ app.MapPost(
         HttpRequest request,
         IDeviceAuthenticator authenticator,
         IMeasurementRepository repository,
+        IIncidentRepository incidentRepository,
         IDevicePresenceRepository presenceRepository,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) =>
@@ -395,6 +399,9 @@ app.MapPost(
                 .ToString()
         };
         var wasCreated = await repository.AddIfNotExistsAsync(serverObservedMeasurement, cancellationToken);
+        await incidentRepository.ProcessLatestMeasurementAsync(
+            serverObservedMeasurement.LineId,
+            cancellationToken);
         await presenceRepository.RecordHeartbeatAsync(
             new AgentHeartbeat(
                 measurement.SchoolId,
@@ -406,6 +413,76 @@ app.MapPost(
         return wasCreated
             ? Results.Created($"/api/measurements/{measurement.EventId}", new { measurement.EventId })
             : Results.Ok(new { measurement.EventId, duplicate = true });
+    });
+
+app.MapGet(
+    "/api/incidents",
+    async (
+        Guid? schoolId,
+        IncidentStatus? status,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int? limit,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IIncidentRepository repository,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Incidents require PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        var toUtc = to ?? timeProvider.GetUtcNow().AddMinutes(1);
+        var fromUtc = from ?? toUtc.AddDays(-30);
+        if (fromUtc >= toUtc)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["period"] = ["The start of the period must be earlier than the end."]
+            });
+        }
+
+        return Results.Ok(await repository.GetIncidentsAsync(
+            schoolId,
+            status,
+            fromUtc,
+            toUtc,
+            Math.Clamp(limit ?? 200, 1, 1_000),
+            cancellationToken));
+    });
+
+app.MapGet(
+    "/api/incidents/{incidentId:guid}",
+    async (
+        Guid incidentId,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IIncidentRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Incidents require PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        var incident = await repository.GetIncidentAsync(incidentId, cancellationToken);
+        return incident is null ? Results.NotFound() : Results.Ok(incident);
     });
 
 app.MapGet(

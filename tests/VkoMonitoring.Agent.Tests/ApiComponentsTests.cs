@@ -132,6 +132,9 @@ public sealed class ApiComponentsTests : IDisposable
         Assert.Contains("CREATE TABLE IF NOT EXISTS devices", sql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS measurements", sql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS device_activation_codes", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS incidents", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS incident_history", sql, StringComparison.Ordinal);
+        Assert.Contains("ux_incidents_one_open_per_line", sql, StringComparison.Ordinal);
         Assert.Contains("threshold_download_mbps", sql, StringComparison.Ordinal);
     }
 
