@@ -22,3 +22,11 @@
 .contract-shortfall { color:#9a3412; }
 @media(max-width:760px) { .directory-grid { grid-template-columns:1fr; } }
 .activation-form { margin-top:24px; padding-top:16px; border-top:1px solid #e2e8f0; } .activation-result input { display:block; width:100%; box-sizing:border-box; padding:12px; font:600 20px monospace; margin:12px 0; }
+
+.incident-filters { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:16px 0; }
+.incident-filters input,.incident-filters select,.incident-create input,.incident-create select,.incident-detail input,.incident-detail select,.incident-create textarea,.incident-detail textarea { padding:10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; width:100%; box-sizing:border-box; min-width:0; }
+.incident-create { margin-top:20px; } .incident-create summary { cursor:pointer; font-weight:600; } .incident-create form { margin-top:16px; }
+.incident-detail { margin-top:24px; padding-top:20px; border-top:1px solid #e2e8f0; }
+.incident-text { white-space:pre-wrap; overflow-wrap:anywhere; } .incident-history { padding-left:22px; } .incident-history li { border-bottom:1px solid #e2e8f0; padding:8px 0; }
+@media(max-width:760px) { .incident-filters > label { width:100%; } }
+.sidebar button.nav-item { width:100%; border:0; background:transparent; font:inherit; text-align:left; cursor:pointer; }

@@ -4,6 +4,7 @@ import { createOverviewTools } from "./overview-tools.js";
 import { createSchoolMap } from "./school-map.js";
 import { createDirectoryPanel } from "./directory-panel.js";
 import { contractShortfalls } from "./directory-model.js";
+import { createIncidentPanel } from "./incident-panel.js";
 
 const byId = id => document.getElementById(id);
 const state = { token: null, user: null, expires: 0, epoch: 0, schools: [], loaded: false, loading: false,
@@ -59,6 +60,7 @@ function endSession(text = "") {
   overviewTools.clear();
   schoolMap.clear();
   directoryPanel.clear();
+  incidentPanel.clear();
   state.controller?.abort();
   clearTimeout(state.expiryTimer);
   Object.assign(state, { token: null, user: null, expires: 0, schools: [], loaded: false, loading: false, loadedAt: null });
@@ -241,9 +243,12 @@ async function refresh() {
     byId("access-description").textContent = accessDescription(user);
     updateDistricts(); renderSummary(); renderSchools();
     directoryPanel.render(schools, user);
+    incidentPanel.configure(schools, user);
     message("dashboard-message", "");
     byId("updated-at").textContent = `Обновлено ${timestamp(state.loadedAt)}`;
     await overviewTools.refresh(schools);
+    if (epoch !== state.epoch) return;
+    await incidentPanel.refresh();
     if (schoolPanel.isOpen()) await schoolPanel.refresh();
   } catch (error) {
     if (epoch !== state.epoch) return;
@@ -262,6 +267,7 @@ async function refresh() {
 }
 
 const schoolPanel = createSchoolPanel({ request, getSession: () => ({ token: state.token, epoch: state.epoch }),
+  onIncidents: school => incidentPanel.showSchool(school.schoolId),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element, badge, lineCard });
 const overviewTools = createOverviewTools({ request, getSession: () => ({ token: state.token, epoch: state.epoch }),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element });
@@ -270,6 +276,9 @@ const schoolMap = createSchoolMap({ element, openSchool: school => schoolPanel.o
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
 const directoryPanel = createDirectoryPanel({ element, request,
   getSession: () => ({ token: state.token, epoch: state.epoch, user: state.user }), onSaved: refresh,
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
+const incidentPanel = createIncidentPanel({ element, request,
+  getSession: () => ({ token: state.token, epoch: state.epoch }),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
 for (const [id, label] of [["provider-filter", "Поставщик"], ["connection-filter", "Тип подключения"]]) {
   const wrap = element("div", "filter"); const select = element("select"); select.id = id;
@@ -320,6 +329,7 @@ byId("logout").addEventListener("click", async () => {
   catch (error) { if (epoch === state.epoch && error.status !== 401) message("login-message", "Данные в этой вкладке очищены, но сервер не подтвердил выход. Проверьте соединение."); }
 });
 byId("refresh").addEventListener("click", refresh);
+byId("open-incidents").addEventListener("click", () => { schoolPanel.clear(); document.title = "Школы и линии · Мониторинг интернета ВКО"; incidentPanel.showSchool(""); });
 for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).addEventListener(id === "search" ? "input" : "change", renderSchools);
 byId("reset-filters").addEventListener("click", () => { for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).value = ""; renderSchools(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);

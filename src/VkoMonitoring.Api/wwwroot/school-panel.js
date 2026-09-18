@@ -1,9 +1,9 @@
 import { metric, timestamp, presenceLabels } from "./dashboard-model.js";
 import { measurements, historyLimit, periodRange, periodQuery, chartData, dateValue } from "./history-model.js";
 
-export function createSchoolPanel({ request, getSession, onUnauthorized, element, badge, lineCard }) {
+export function createSchoolPanel({ request, getSession, onUnauthorized, onIncidents, element, badge, lineCard }) {
   const host = document.getElementById("school-detail");
-  const overview = ["overview-header", "summary", "overview-tools", "schools-panel", "school-map-panel", "directory-panel"].map(id => document.getElementById(id));
+  const overview = ["overview-header", "summary", "overview-tools", "schools-panel", "school-map-panel", "directory-panel", "incidents-panel"].map(id => document.getElementById(id));
   let schoolId = null, selectedDevice = "", version = 0, controller = null, overviewVisibility = [];
   let controls, content, feedback, updated, refreshButton;
   const button = (text, action, className = "button secondary") => {
@@ -33,6 +33,7 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, element
     heading.append(button("← К списку школ", close, "text-button"), title,
       element("p", "page-subtitle", [school.districtCity, school.address].filter(Boolean).join(" · ") || "Адрес не указан"));
     refreshButton = button("↻ Обновить карточку", refresh);
+    heading.append(button("Инциденты этой школы", () => { close(); onIncidents?.(school); }, "text-button"));
     updated = element("span", "updated-at", "Загрузка…");
     const actions = element("div", "refresh-area"); actions.append(refreshButton, updated); header.append(heading, actions);
     const period = element("div", "detail-period");

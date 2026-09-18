@@ -1,5 +1,7 @@
 # Временный публичный API через Cloudflare Tunnel
 
+Это дополнительный инструмент локальной разработки. Текущий публичный сервер — https://vko-internet-monitoring-api.onrender.com/ ; Tunnel для обычного подключения школьных компьютеров не требуется. Состояние проекта: PROJECT_SNAPSHOT.md.
+
 Cloudflare Quick Tunnel публикует локальный API через HTTPS без открытия портов
 роутера и без публичного IP. API и PostgreSQL продолжают работать на ноутбуке.
 
