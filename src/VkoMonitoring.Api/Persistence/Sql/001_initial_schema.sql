@@ -11,6 +11,17 @@ CREATE TABLE IF NOT EXISTS schools (
     updated_at_utc timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS latitude double precision;
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS longitude double precision;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='ck_schools_location' AND conrelid='schools'::regclass) THEN
+        ALTER TABLE schools ADD CONSTRAINT ck_schools_location CHECK (
+            (latitude IS NULL AND longitude IS NULL) OR
+            (latitude IS NOT NULL AND longitude IS NOT NULL AND
+             latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180));
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS internet_lines (
     id uuid PRIMARY KEY,
     school_id uuid NOT NULL REFERENCES schools(id),

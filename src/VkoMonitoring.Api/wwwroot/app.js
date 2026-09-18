@@ -1,6 +1,9 @@
 import { roles, statuses, presenceLabels, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, schoolMeasurementDescription, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
 import { createSchoolPanel } from "./school-panel.js";
 import { createOverviewTools } from "./overview-tools.js";
+import { createSchoolMap } from "./school-map.js";
+import { createDirectoryPanel } from "./directory-panel.js";
+import { contractShortfalls } from "./directory-model.js";
 
 const byId = id => document.getElementById(id);
 const state = { token: null, user: null, expires: 0, epoch: 0, schools: [], loaded: false, loading: false,
@@ -37,7 +40,7 @@ async function request(path, { method = "GET", body, token, signal, responseType
       cache: "no-store", credentials: "omit", signal: controller.signal });
     if (!response.ok) {
       let detail = "";
-      if (response.status === 422) { try { detail = (await response.json()).detail || ""; } catch {} }
+      if ([400, 422].includes(response.status)) { try { const problem = await response.json(); detail = problem.detail || problem.error || Object.values(problem.errors || {}).flat().join(" "); } catch {} }
       throw new ApiError(response.status, detail);
     }
     if (responseType === "file") return { blob: await response.blob(),
@@ -54,6 +57,8 @@ function endSession(text = "") {
   state.epoch++;
   schoolPanel.clear();
   overviewTools.clear();
+  schoolMap.clear();
+  directoryPanel.clear();
   state.controller?.abort();
   clearTimeout(state.expiryTimer);
   Object.assign(state, { token: null, user: null, expires: 0, schools: [], loaded: false, loading: false, loadedAt: null });
@@ -65,6 +70,7 @@ function endSession(text = "") {
   byId("district-filter").firstChild.value = "";
   byId("search").value = "";
   byId("status-filter").value = "";
+  for (const id of ["provider-filter", "connection-filter"]) byId(id).replaceChildren(new Option("Все", ""));
   byId("password").value = "";
   byId("password").type = "password";
   byId("show-password").textContent = "Показать";
@@ -127,6 +133,9 @@ function lineCard(line) {
     element("span", "", `Устройств на связи: ${line.activeDeviceCount} из ${line.deviceCount}`));
   if (line.measurementFreshness === "Stale") foot.append(element("span", "", "Последнее качество: " + (statuses[line.qualityStatus] || statuses.Unknown)[0]));
   if (line.contractedDownloadMbps !== null || line.contractedUploadMbps !== null) foot.append(element("span", "", `Договор: ↓ ${metric(line.contractedDownloadMbps)} / ↑ ${metric(line.contractedUploadMbps)} Мбит/с`));
+  if (line.contractNumber || line.contractDate) foot.append(element("span", "", `Договор № ${line.contractNumber || "не указан"} · ${line.contractDate || "дата не указана"}`));
+  const shortfalls = contractShortfalls(line);
+  if (shortfalls.length) foot.append(element("span", "contract-shortfall", `Последний актуальный замер ниже договорной скорости: ${shortfalls.join(", ")}.`));
   card.append(top, metrics, foot);
   return card;
 }
@@ -185,10 +194,12 @@ function renderSummary() {
 }
 
 function renderSchools() {
-  const schools = filterSchools(state.schools, byId("search").value, byId("district-filter").value, byId("status-filter").value);
+  const schools = filterSchools(state.schools, byId("search").value, byId("district-filter").value, byId("status-filter").value,
+    byId("provider-filter").value, byId("connection-filter").value);
+  if (state.loaded) schoolMap.render(schools, state.schools, state.user);
   byId("school-count").textContent = state.loaded ? String(state.schools.length) : "—";
   byId("result-count").textContent = state.loaded ? `Показано: ${schools.length} из ${state.schools.length}` : "Загрузка школ…";
-  byId("reset-filters").hidden = !byId("search").value && !byId("district-filter").value && !byId("status-filter").value;
+  byId("reset-filters").hidden = !["search", "district-filter", "status-filter", "provider-filter", "connection-filter"].some(id => byId(id).value);
   byId("school-rows").replaceChildren(...schools.flatMap(schoolRows));
   byId("empty-state").hidden = !state.loaded || schools.length > 0;
   byId("empty-title").textContent = state.schools.length ? "Школы не найдены" : "Пока нет доступных школ";
@@ -196,6 +207,12 @@ function renderSchools() {
 }
 
 function updateDistricts() {
+  for (const [id, property, label] of [["provider-filter", "providerName", "Все поставщики"], ["connection-filter", "connectionType", "Все подключения"]]) {
+    const selected = byId(id).value;
+    const values = [...new Set(state.schools.flatMap(school => school.lines.map(line => line[property])).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+    byId(id).replaceChildren(new Option(label, ""), ...values.map(value => new Option(value, value)));
+    byId(id).value = values.includes(selected) ? selected : "";
+  }
   const selected = byId("district-filter").value;
   const districts = [...new Set(state.schools.map(school => school.districtCity).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
   const first = element("option", "", "Все районы и города"); first.value = "";
@@ -223,6 +240,7 @@ async function refresh() {
     byId("user-role").textContent = roles[user.role] || "Пользователь";
     byId("access-description").textContent = accessDescription(user);
     updateDistricts(); renderSummary(); renderSchools();
+    directoryPanel.render(schools, user);
     message("dashboard-message", "");
     byId("updated-at").textContent = `Обновлено ${timestamp(state.loadedAt)}`;
     await overviewTools.refresh(schools);
@@ -247,6 +265,18 @@ const schoolPanel = createSchoolPanel({ request, getSession: () => ({ token: sta
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element, badge, lineCard });
 const overviewTools = createOverviewTools({ request, getSession: () => ({ token: state.token, epoch: state.epoch }),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element });
+const schoolMap = createSchoolMap({ element, openSchool: school => schoolPanel.open(school), request,
+  getSession: () => ({ token: state.token, epoch: state.epoch }), onSaved: refresh,
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
+const directoryPanel = createDirectoryPanel({ element, request,
+  getSession: () => ({ token: state.token, epoch: state.epoch, user: state.user }), onSaved: refresh,
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
+for (const [id, label] of [["provider-filter", "Поставщик"], ["connection-filter", "Тип подключения"]]) {
+  const wrap = element("div", "filter"); const select = element("select"); select.id = id;
+  const caption = element("label", "", label); caption.htmlFor = id;
+  select.append(new Option("Все", "")); wrap.append(caption, select);
+  byId("reset-filters").before(wrap);
+}
 
 byId("login-form").addEventListener("submit", async event => {
   event.preventDefault();
@@ -290,7 +320,7 @@ byId("logout").addEventListener("click", async () => {
   catch (error) { if (epoch === state.epoch && error.status !== 401) message("login-message", "Данные в этой вкладке очищены, но сервер не подтвердил выход. Проверьте соединение."); }
 });
 byId("refresh").addEventListener("click", refresh);
-for (const id of ["search", "district-filter", "status-filter"]) byId(id).addEventListener(id === "search" ? "input" : "change", renderSchools);
-byId("reset-filters").addEventListener("click", () => { for (const id of ["search", "district-filter", "status-filter"]) byId(id).value = ""; renderSchools(); });
+for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).addEventListener(id === "search" ? "input" : "change", renderSchools);
+byId("reset-filters").addEventListener("click", () => { for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).value = ""; renderSchools(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

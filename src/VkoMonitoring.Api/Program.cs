@@ -21,6 +21,12 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
 });
 
+var mapConfiguration = new ConfigurationBuilder()
+    .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "wwwroot", "map-config.json"))
+    .Build();
+var contentSecurityPolicy = MapContentSecurityPolicy.Create(mapConfiguration["tileUrl"]
+    ?? throw new InvalidOperationException("Map tile URL is missing."));
+
 var options = builder.Configuration
     .GetRequiredSection(MonitoringApiOptions.SectionName)
     .Get<MonitoringApiOptions>()
@@ -127,6 +133,8 @@ builder.Services.AddRateLimiter(rateLimiterOptions =>
 if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(postgresConnectionString!));
+    builder.Services.AddSingleton<PostgresSchoolLocationRepository>();
+    builder.Services.AddSingleton<PostgresDirectoryRepository>();
     builder.Services.AddSingleton<PostgresDatabaseInitializer>();
     builder.Services.AddSingleton<PostgresUserRepository>();
     builder.Services.AddSingleton<IMeasurementRepository, PostgresMeasurementRepository>();
@@ -157,9 +165,9 @@ app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
     context.Response.Headers["Content-Security-Policy"] =
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+        contentSecurityPolicy;
     await next(context);
 });
 app.UseDefaultFiles();
@@ -190,6 +198,8 @@ app.UseRouting();
 app.UseRateLimiter();
 app.UseMiddleware<UserAccessMiddleware>();
 app.MapUserEndpoints();
+app.MapSchoolLocationEndpoints();
+app.MapDirectoryEndpoints();
 app.MapReportEndpoints();
 
 if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))

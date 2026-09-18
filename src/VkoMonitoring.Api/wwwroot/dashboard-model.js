@@ -12,9 +12,10 @@ export function accessDescription(user) {
   }
 }
 
-export function filterSchools(schools, query, district, status) {
+export function filterSchools(schools, query, district, status, provider = "", connection = "") {
   const search = query.trim().toLocaleLowerCase("ru");
   return schools.filter(school => (!district || school.districtCity === district) && (!status || school.status === status) &&
+    ((!provider && !connection) || school.lines.some(line => (!provider || line.providerName === provider) && (!connection || line.connectionType === connection))) &&
     (!search || [school.name, school.districtCity, ...school.lines.map(line => line.providerName)]
       .filter(Boolean).some(value => value.toLocaleLowerCase("ru").includes(search))));
 }

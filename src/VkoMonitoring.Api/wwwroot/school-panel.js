@@ -3,8 +3,8 @@ import { measurements, historyLimit, periodRange, periodQuery, chartData, dateVa
 
 export function createSchoolPanel({ request, getSession, onUnauthorized, element, badge, lineCard }) {
   const host = document.getElementById("school-detail");
-  const overview = ["overview-header", "summary", "overview-tools", "schools-panel"].map(id => document.getElementById(id));
-  let schoolId = null, selectedDevice = "", version = 0, controller = null;
+  const overview = ["overview-header", "summary", "overview-tools", "schools-panel", "school-map-panel", "directory-panel"].map(id => document.getElementById(id));
+  let schoolId = null, selectedDevice = "", version = 0, controller = null, overviewVisibility = [];
   let controls, content, feedback, updated, refreshButton;
   const button = (text, action, className = "button secondary") => {
     const node = element("button", className, text); node.type = "button";
@@ -15,7 +15,8 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, element
   function clear() {
     cancel(); schoolId = null; selectedDevice = ""; host.replaceChildren(); host.hidden = true;
     host.setAttribute("aria-busy", "false");
-    overview.forEach(node => node.hidden = false);
+    overviewVisibility.forEach(([node, hidden]) => node.hidden = hidden);
+    overviewVisibility = [];
   }
   function close() {
     const id = schoolId; clear();
@@ -24,6 +25,7 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, element
   }
   function open(school) {
     clear(); schoolId = school.schoolId;
+    overviewVisibility = overview.map(node => [node, node.hidden]);
     overview.forEach(node => node.hidden = true); host.hidden = false;
     const header = element("header", "detail-header");
     const heading = element("div");
@@ -184,7 +186,11 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, element
       const lines = section("Линии школы", "Показано текущее состояние доступных вам линий; выбор периода влияет на итоги и историю.");
       const grid = element("div", "line-grid"); grid.append(...school.lines.map(lineCard));
       if (!school.lines.length) grid.append(element("p", "section-note", "Линии не зарегистрированы.")); lines.append(grid);
-      content.replaceChildren(lines, analyticsView(analytics), devicesView(devices, school), historyView(rows, devices));
+      const contacts = section("Ответственный и контакты", "Контактные данные организации образования.");
+      for (const [label, value] of [["Ответственный", school.responsibleName], ["Должность", school.responsiblePosition],
+        ["Телефон", school.responsiblePhone], ["Электронная почта", school.responsibleEmail]])
+        contacts.append(element("p", "section-note", `${label}: ${value || "не указан"}`));
+      content.replaceChildren(contacts, lines, analyticsView(analytics), devicesView(devices, school), historyView(rows, devices));
       updated.textContent = `Обновлено ${timestamp(new Date().toISOString())}`;
     } catch (error) {
       if (!valid()) return;

@@ -41,6 +41,12 @@ public sealed record SchoolOverview(
     MeasurementSnapshot? LatestMeasurement)
 {
     public Guid? PrimaryLineId { get; init; }
+    public double? Latitude { get; init; }
+    public double? Longitude { get; init; }
+    public string? ResponsibleName { get; init; }
+    public string? ResponsiblePosition { get; init; }
+    public string? ResponsiblePhone { get; init; }
+    public string? ResponsibleEmail { get; init; }
     public MonitoringStatus QualityStatus { get; init; }
     public MeasurementFreshness MeasurementFreshness { get; init; }
     public AgentPresence AgentPresence { get; init; }
@@ -80,6 +86,8 @@ public sealed record LineOverview(
     MonitoringStatus Status,
     MeasurementSnapshot? LatestMeasurement)
 {
+    public string? ContractNumber { get; init; }
+    public DateOnly? ContractDate { get; init; }
     public MonitoringStatus QualityStatus { get; init; }
     public MeasurementFreshness MeasurementFreshness { get; init; }
     public AgentPresence AgentPresence { get; init; }

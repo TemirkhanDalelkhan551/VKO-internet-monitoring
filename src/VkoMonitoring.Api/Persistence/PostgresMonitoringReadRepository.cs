@@ -21,7 +21,8 @@ public sealed class PostgresMonitoringReadRepository(
                 WHERE d.school_id = s.id
                   AND /* device access */
                   AND d.is_blocked = false
-                  AND d.last_seen_at_utc >= now() - ($1 * interval '1 minute'))
+                  AND d.last_seen_at_utc >= now() - ($1 * interval '1 minute')),
+               s.latitude, s.longitude, s.responsible_name, s.responsible_position, s.responsible_phone, s.responsible_email
         FROM schools s
         WHERE /* school access */
         """;
@@ -267,7 +268,13 @@ public sealed class PostgresMonitoringReadRepository(
                     reader.GetGuid(0), reader.GetString(1),
                     GetNullableString(reader, 2), GetNullableString(reader, 3),
                     null, null, null, null, reader.GetInt32(4), reader.GetInt32(5),
-                    MonitoringStatus.Unknown, null));
+                    MonitoringStatus.Unknown, null)
+                {
+                    Latitude = reader.IsDBNull(6) ? null : reader.GetDouble(6),
+                    Longitude = reader.IsDBNull(7) ? null : reader.GetDouble(7),
+                    ResponsibleName = GetNullableString(reader, 8), ResponsiblePosition = GetNullableString(reader, 9),
+                    ResponsiblePhone = GetNullableString(reader, 10), ResponsibleEmail = GetNullableString(reader, 11)
+                });
             }
         }
 
@@ -291,7 +298,7 @@ public sealed class PostgresMonitoringReadRepository(
                    presence.device_count, presence.active_count, presence.last_seen,
                    latest.event_id, latest.measured_at_utc, latest.download_mbps,
                    latest.upload_mbps, latest.ping_milliseconds, latest.jitter_milliseconds,
-                   latest.packet_loss_percent, latest.connection_status, latest.device_id
+                   latest.packet_loss_percent, latest.connection_status, latest.device_id, l.contract_number, l.contract_date
             FROM internet_lines l
             LEFT JOIN LATERAL (
                 SELECT COUNT(*)::int AS device_count,
@@ -333,7 +340,11 @@ public sealed class PostgresMonitoringReadRepository(
                 GetNullableDouble(reader, 6), GetNullableDouble(reader, 7),
                 reader.GetInt32(8), reader.GetInt32(9), GetNullableDateTimeOffset(reader, 10),
                 MonitoringStatusEvaluator.Evaluate(measurement, options.Thresholds),
-                ToSnapshot(measurement)), now, options));
+                ToSnapshot(measurement))
+            {
+                ContractNumber = GetNullableString(reader, 20),
+                ContractDate = reader.IsDBNull(21) ? null : reader.GetFieldValue<DateOnly>(21)
+            }, now, options));
         }
 
         return lines;
