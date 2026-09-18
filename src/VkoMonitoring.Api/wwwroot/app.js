@@ -1,4 +1,5 @@
 import { roles, statuses, presenceLabels, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, schoolMeasurementDescription, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
+import { createSchoolPanel } from "./school-panel.js";
 
 const byId = id => document.getElementById(id);
 const state = { token: null, user: null, expires: 0, epoch: 0, schools: [], loaded: false, loading: false,
@@ -43,6 +44,7 @@ async function request(path, { method = "GET", body, token, signal } = {}) {
 
 function endSession(text = "") {
   state.epoch++;
+  schoolPanel.clear();
   state.controller?.abort();
   clearTimeout(state.expiryTimer);
   Object.assign(state, { token: null, user: null, expires: 0, schools: [], loaded: false, loading: false, loadedAt: null });
@@ -134,6 +136,10 @@ function schoolRows(school) {
   });
   button.id = `school-${school.schoolId}`;
   schoolCell.append(button, element("span", "secondary-text", school.districtCity || "Район не указан"), element("span", "secondary-text", `${lineCountLabel(school.lines.length)} · ${state.expanded.has(school.schoolId) ? "Скрыть" : "Показать"} показатели`));
+  const open = element("button", "text-button school-open", "Открыть карточку →");
+  open.type = "button"; open.id = `open-${school.schoolId}`;
+  open.setAttribute("aria-label", `Открыть карточку: ${school.name}`);
+  open.addEventListener("click", () => schoolPanel.open(school)); schoolCell.append(open);
   const lineCell = element("td");
   lineCell.append(element("span", "", school.providerName || (school.primaryLineId ? "Поставщик не указан" : "Нет доступной основной линии")),
     element("span", "secondary-text", school.connectionType || "—"));
@@ -210,6 +216,7 @@ async function refresh() {
     updateDistricts(); renderSummary(); renderSchools();
     message("dashboard-message", "");
     byId("updated-at").textContent = `Обновлено ${timestamp(state.loadedAt)}`;
+    if (schoolPanel.isOpen()) await schoolPanel.refresh();
   } catch (error) {
     if (epoch !== state.epoch) return;
     if (error.status === 401) { endSession("Сессия завершена или доступ изменён. Войдите заново."); return; }
@@ -225,6 +232,9 @@ async function refresh() {
     }
   }
 }
+
+const schoolPanel = createSchoolPanel({ request, getSession: () => ({ token: state.token, epoch: state.epoch }),
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element, badge, lineCard });
 
 byId("login-form").addEventListener("submit", async event => {
   event.preventDefault();
