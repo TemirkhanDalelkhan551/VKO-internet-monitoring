@@ -16,6 +16,22 @@ public sealed class JsonFileMonitoringReadRepository(
     private readonly string _deviceDirectory =
         Path.GetFullPath(Path.Combine(options.DataDirectory, "devices"));
 
+    public async Task<IReadOnlyList<MeasurementReportRow>> GetReportRowsAsync(ReportFilter filter, int limit, CancellationToken cancellationToken)
+    {
+        var bindings = options.DeviceBindings.ToDictionary(pair => Guid.Parse(pair.Key), pair => pair.Value);
+        return (await LoadMeasurementsAsync(cancellationToken)).Where(m =>
+            m.MeasuredAtUtc >= filter.FromUtc && m.MeasuredAtUtc < filter.ToUtc &&
+            (filter.SchoolId is null || m.SchoolId == filter.SchoolId) &&
+            (filter.DeviceIds.Length == 0 || filter.DeviceIds.Contains(m.DeviceId)) &&
+            (filter.ConnectionStatus is null || m.ConnectionStatus.ToString() == filter.ConnectionStatus) &&
+            bindings.TryGetValue(m.DeviceId, out var binding) && binding.SchoolId == m.SchoolId && binding.LineId == m.LineId)
+            .OrderBy(m => m.SchoolId).ThenBy(m => m.MeasuredAtUtc).ThenBy(m => m.EventId).Take(limit)
+            .Select(m => new MeasurementReportRow(m.SchoolId, bindings[m.DeviceId].SchoolName ?? m.SchoolId.ToString(),
+                m.DeviceId, bindings[m.DeviceId].DeviceName ?? m.DeviceId.ToString(), null, m.MeasuredAtUtc,
+                m.DownloadMbps, m.UploadMbps, m.PingMilliseconds, m.JitterMilliseconds, m.PacketLossPercent,
+                m.ConnectionStatus.ToString(), MonitoringStatusEvaluator.Evaluate(m, options.Thresholds) != MonitoringStatus.Normal)).ToArray();
+    }
+
     public async Task<IReadOnlyList<SchoolOverview>> GetSchoolsAsync(
         CancellationToken cancellationToken)
     {

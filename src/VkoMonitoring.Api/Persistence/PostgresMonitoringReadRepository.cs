@@ -30,6 +30,45 @@ public sealed class PostgresMonitoringReadRepository(
         .Replace("/* school access */", access.Current?.AllowedLineIds is null ? "true" :
             $"EXISTS (SELECT 1 FROM internet_lines l WHERE l.school_id=s.id AND {access.SqlCondition("l.id")})");
 
+    public async Task<IReadOnlyList<MeasurementReportRow>> GetReportRowsAsync(
+        ReportFilter filter, int limit, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.id, s.name, d.id, d.name, d.room, m.measured_at_utc,
+                   m.download_mbps, m.upload_mbps, m.ping_milliseconds,
+                   m.jitter_milliseconds, m.packet_loss_percent, m.connection_status,
+                   (m.connection_status <> 'Online'
+                    OR COALESCE(m.download_mbps < m.threshold_download_mbps, false)
+                    OR COALESCE(m.upload_mbps < m.threshold_upload_mbps, false)
+                    OR COALESCE(m.ping_milliseconds > m.threshold_ping_milliseconds, false)
+                    OR COALESCE(m.jitter_milliseconds > m.threshold_jitter_milliseconds, false)
+                    OR COALESCE(m.packet_loss_percent > m.threshold_packet_loss_percent, false))
+            FROM measurements m
+            JOIN schools s ON s.id = m.school_id
+            JOIN devices d ON d.id = m.device_id AND d.school_id = m.school_id AND d.line_id = m.line_id
+            WHERE m.measured_at_utc >= $1 AND m.measured_at_utc < $2
+              AND ($3::uuid IS NULL OR m.school_id = $3)
+              AND (cardinality($4::uuid[]) = 0 OR m.device_id = ANY($4))
+              AND ($5::text IS NULL OR m.connection_status = $5)
+              AND /* access */
+            ORDER BY s.name, m.measured_at_utc, m.event_id
+            LIMIT $6;
+            """;
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("m.line_id")));
+        command.Parameters.AddWithValue(filter.FromUtc); command.Parameters.AddWithValue(filter.ToUtc);
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = filter.SchoolId is null ? DBNull.Value : filter.SchoolId.Value });
+        command.Parameters.AddWithValue(filter.DeviceIds);
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)filter.ConnectionStatus ?? DBNull.Value });
+        command.Parameters.AddWithValue(limit);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<MeasurementReportRow>();
+        while (await reader.ReadAsync(cancellationToken)) rows.Add(new MeasurementReportRow(
+            reader.GetGuid(0), reader.GetString(1), reader.GetGuid(2), reader.GetString(3), GetNullableString(reader, 4),
+            reader.GetFieldValue<DateTimeOffset>(5), GetNullableDouble(reader, 6), GetNullableDouble(reader, 7),
+            GetNullableDouble(reader, 8), GetNullableDouble(reader, 9), GetNullableDouble(reader, 10), reader.GetString(11), reader.GetBoolean(12)));
+        return rows;
+    }
+
     public async Task<IReadOnlyList<SchoolOverview>> GetSchoolsAsync(
         CancellationToken cancellationToken)
     {

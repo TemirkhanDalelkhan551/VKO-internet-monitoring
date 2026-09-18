@@ -11,6 +11,7 @@ using VkoMonitoring.Api.Health;
 using VkoMonitoring.Api.Models;
 using VkoMonitoring.Api.Persistence;
 using VkoMonitoring.Api.Security;
+using VkoMonitoring.Api.Services;
 using VkoMonitoring.Api.Validation;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -189,6 +190,7 @@ app.UseRouting();
 app.UseRateLimiter();
 app.UseMiddleware<UserAccessMiddleware>();
 app.MapUserEndpoints();
+app.MapReportEndpoints();
 
 if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
 {

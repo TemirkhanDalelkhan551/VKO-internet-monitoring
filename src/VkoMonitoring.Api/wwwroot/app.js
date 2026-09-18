@@ -1,5 +1,6 @@
 import { roles, statuses, presenceLabels, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, schoolMeasurementDescription, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
 import { createSchoolPanel } from "./school-panel.js";
+import { createOverviewTools } from "./overview-tools.js";
 
 const byId = id => document.getElementById(id);
 const state = { token: null, user: null, expires: 0, epoch: 0, schools: [], loaded: false, loading: false,
@@ -20,10 +21,10 @@ function message(id, text, info = false) {
 }
 
 class ApiError extends Error {
-  constructor(status) { super(`HTTP ${status}`); this.status = status; }
+  constructor(status, detail = "") { super(`HTTP ${status}`); this.status = status; this.detail = detail; }
 }
 
-async function request(path, { method = "GET", body, token, signal } = {}) {
+async function request(path, { method = "GET", body, token, signal, responseType = "json" } = {}) {
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
@@ -34,7 +35,14 @@ async function request(path, { method = "GET", body, token, signal } = {}) {
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store", credentials: "omit", signal: controller.signal });
-    if (!response.ok) throw new ApiError(response.status);
+    if (!response.ok) {
+      let detail = "";
+      if (response.status === 422) { try { detail = (await response.json()).detail || ""; } catch {} }
+      throw new ApiError(response.status, detail);
+    }
+    if (responseType === "file") return { blob: await response.blob(),
+      filename: response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] || "vko-report",
+      count: Number(response.headers.get("X-Report-Measurement-Count")) };
     return response.status === 204 ? null : await response.json();
   } finally {
     clearTimeout(timer);
@@ -45,6 +53,7 @@ async function request(path, { method = "GET", body, token, signal } = {}) {
 function endSession(text = "") {
   state.epoch++;
   schoolPanel.clear();
+  overviewTools.clear();
   state.controller?.abort();
   clearTimeout(state.expiryTimer);
   Object.assign(state, { token: null, user: null, expires: 0, schools: [], loaded: false, loading: false, loadedAt: null });
@@ -216,6 +225,7 @@ async function refresh() {
     updateDistricts(); renderSummary(); renderSchools();
     message("dashboard-message", "");
     byId("updated-at").textContent = `Обновлено ${timestamp(state.loadedAt)}`;
+    await overviewTools.refresh(schools);
     if (schoolPanel.isOpen()) await schoolPanel.refresh();
   } catch (error) {
     if (epoch !== state.epoch) return;
@@ -235,6 +245,8 @@ async function refresh() {
 
 const schoolPanel = createSchoolPanel({ request, getSession: () => ({ token: state.token, epoch: state.epoch }),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element, badge, lineCard });
+const overviewTools = createOverviewTools({ request, getSession: () => ({ token: state.token, epoch: state.epoch }),
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново."), element });
 
 byId("login-form").addEventListener("submit", async event => {
   event.preventDefault();

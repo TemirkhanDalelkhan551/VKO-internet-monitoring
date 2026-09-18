@@ -3,7 +3,7 @@ import { measurements, historyLimit, periodRange, periodQuery, chartData, dateVa
 
 export function createSchoolPanel({ request, getSession, onUnauthorized, element, badge, lineCard }) {
   const host = document.getElementById("school-detail");
-  const overview = ["overview-header", "summary", "schools-panel"].map(id => document.getElementById(id));
+  const overview = ["overview-header", "summary", "overview-tools", "schools-panel"].map(id => document.getElementById(id));
   let schoolId = null, selectedDevice = "", version = 0, controller = null;
   let controls, content, feedback, updated, refreshButton;
   const button = (text, action, className = "button secondary") => {

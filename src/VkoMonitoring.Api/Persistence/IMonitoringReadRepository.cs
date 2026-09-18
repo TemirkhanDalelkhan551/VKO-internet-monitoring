@@ -5,6 +5,7 @@ namespace VkoMonitoring.Api.Persistence;
 
 public interface IMonitoringReadRepository
 {
+    Task<IReadOnlyList<MeasurementReportRow>> GetReportRowsAsync(ReportFilter filter, int limit, CancellationToken cancellationToken);
     Task<IReadOnlyList<SchoolOverview>> GetSchoolsAsync(CancellationToken cancellationToken);
     Task<SchoolOverview?> GetSchoolAsync(Guid schoolId, CancellationToken cancellationToken);
     Task<DeviceOverview?> GetDeviceAsync(Guid deviceId, CancellationToken cancellationToken);
