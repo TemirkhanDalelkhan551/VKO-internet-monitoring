@@ -58,3 +58,8 @@ https://vko-internet-monitoring-api.onrender.com
 Локальный запуск остаётся без изменений: `docker-compose.yml` поднимает только
 PostgreSQL, а API запускается через `dotnet run`.
 
+
+
+## Демонстрационный стенд 18.09.2026
+
+Адрес: https://vko-internet-monitoring-api.onrender.com/ . Web Service и PostgreSQL 17 — Free, Frankfurt. База истекает 18.10.2026. Данные перенесены, общий админ-токен отключён, прежний администратор работает. Установленная служба доставила heartbeat и новый реальный замер; после переноса в облаке 25 измерений. Внешний доступ к PostgreSQL закрыт после импорта. Перед показом откройте сайт заранее и дождитесь Healthy.
