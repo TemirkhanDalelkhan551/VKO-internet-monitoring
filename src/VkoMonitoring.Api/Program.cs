@@ -1,5 +1,8 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Npgsql;
 using VkoMonitoring.Agent.Core.Domain;
@@ -13,7 +16,8 @@ using VkoMonitoring.Api.Validation;
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
-    ContentRootPath = AppContext.BaseDirectory
+    ContentRootPath = AppContext.BaseDirectory,
+    WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
 });
 
 var options = builder.Configuration
@@ -21,17 +25,33 @@ var options = builder.Configuration
     .Get<MonitoringApiOptions>()
     ?? throw new InvalidOperationException("Monitoring API configuration is missing.");
 
-var postgresConnectionString = builder.Configuration.GetConnectionString("MonitoringDatabase");
+var postgresConnectionString = PostgresConnectionStringResolver.Resolve(
+    builder.Configuration.GetConnectionString("MonitoringDatabase"));
 MonitoringApiOptionsValidator.Validate(options, postgresConnectionString);
 
 builder.Services.AddSingleton(options);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<MonitoringAccessContext>();
 builder.Services.AddSingleton<TokenValidator>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.Configure<ForwardedHeadersOptions>(forwardedHeadersOptions =>
+{
+    forwardedHeadersOptions.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    forwardedHeadersOptions.ForwardedForHeaderName = "CF-Connecting-IP";
+    forwardedHeadersOptions.ForwardLimit = 1;
+    forwardedHeadersOptions.KnownProxies.Clear();
+    forwardedHeadersOptions.KnownProxies.Add(IPAddress.Loopback);
+    forwardedHeadersOptions.KnownProxies.Add(IPAddress.IPv6Loopback);
+});
 builder.Services.AddRateLimiter(rateLimiterOptions =>
 {
+    rateLimiterOptions.AddPolicy("user-login", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(ClientRateLimitPartition.GetKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     rateLimiterOptions.AddPolicy("device-activation", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
-            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            ClientRateLimitPartition.GetKey(httpContext),
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 10,
@@ -39,17 +59,81 @@ builder.Services.AddRateLimiter(rateLimiterOptions =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    rateLimiterOptions.AddPolicy("speed-test", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ClientRateLimitPartition.GetKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 12,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    rateLimiterOptions.AddPolicy("agent-write", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ClientRateLimitPartition.GetKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    rateLimiterOptions.AddPolicy("agent-read", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ClientRateLimitPartition.GetKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    rateLimiterOptions.AddPolicy("admin-read", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ClientRateLimitPartition.GetKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    rateLimiterOptions.AddPolicy("admin-write", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ClientRateLimitPartition.GetKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
     rateLimiterOptions.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    rateLimiterOptions.OnRejected = async (rejected, ct) =>
+    {
+        var context = rejected.HttpContext;
+        context.Response.StatusCode = 429;
+        var repository = context.RequestServices.GetService<PostgresUserRepository>();
+        if (repository is not null)
+        {
+            var id = await repository.BeginAuditAsync(null, "anonymous", "RateLimit",
+                context.Request.Path.Value ?? "/", context.Connection.RemoteIpAddress?.ToString(), ct);
+            await repository.CompleteAuditAsync(id, 429, CancellationToken.None);
+        }
+    };
 });
 if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(postgresConnectionString!));
     builder.Services.AddSingleton<PostgresDatabaseInitializer>();
+    builder.Services.AddSingleton<PostgresUserRepository>();
     builder.Services.AddSingleton<IMeasurementRepository, PostgresMeasurementRepository>();
     builder.Services.AddSingleton<IDevicePresenceRepository, PostgresDevicePresenceRepository>();
     builder.Services.AddSingleton<IMonitoringReadRepository, PostgresMonitoringReadRepository>();
     builder.Services.AddSingleton<IDeviceAuthenticator, PostgresDeviceAuthenticator>();
     builder.Services.AddSingleton<IDeviceRegistrationRepository, PostgresDeviceRegistrationRepository>();
+    builder.Services.AddSingleton<IDeviceAdministrationRepository, PostgresDeviceAdministrationRepository>();
     builder.Services.AddSingleton<IDeviceActivationRepository, PostgresDeviceActivationRepository>();
     builder.Services.AddSingleton<IIncidentRepository, PostgresIncidentRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, PostgresReadinessProbe>();
@@ -61,13 +145,50 @@ else
     builder.Services.AddSingleton<IMonitoringReadRepository, JsonFileMonitoringReadRepository>();
     builder.Services.AddSingleton<IDeviceAuthenticator, ConfigurationDeviceAuthenticator>();
     builder.Services.AddSingleton<IDeviceRegistrationRepository, UnsupportedDeviceRegistrationRepository>();
+    builder.Services.AddSingleton<IDeviceAdministrationRepository, UnsupportedDeviceAdministrationRepository>();
     builder.Services.AddSingleton<IDeviceActivationRepository, UnsupportedDeviceActivationRepository>();
     builder.Services.AddSingleton<IIncidentRepository, UnsupportedIncidentRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, LocalStorageReadinessProbe>();
 }
 
 var app = builder.Build();
+app.UseForwardedHeaders();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    await next(context);
+});
+app.UseDefaultFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache"
+});
+app.Use(async (httpContext, next) =>
+{
+    var maximumRequestBytes = RequestBodySizePolicy.GetMaximumBytes(
+        httpContext.Request.Path,
+        options.MaximumSpeedTestBytes);
+    if (httpContext.Request.ContentLength > maximumRequestBytes)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+        return;
+    }
+
+    var requestBodySizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (requestBodySizeFeature is { IsReadOnly: false })
+    {
+        requestBodySizeFeature.MaxRequestBodySize = maximumRequestBytes;
+    }
+
+    await next(httpContext);
+});
+app.UseRouting();
 app.UseRateLimiter();
+app.UseMiddleware<UserAccessMiddleware>();
+app.MapUserEndpoints();
 
 if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
 {
@@ -116,7 +237,8 @@ app.MapPost(
         return await repository.RecordHeartbeatAsync(heartbeat, cancellationToken)
             ? Results.NoContent()
             : Results.NotFound();
-    });
+    })
+    .RequireRateLimiting("agent-write");
 
 app.MapGet(
     "/api/devices/{deviceId:guid}/status",
@@ -154,7 +276,8 @@ app.MapGet(
             20,
             cancellationToken);
         return Results.Ok(new VkoMonitoring.Api.Models.LocalDeviceStatus(device, measurements));
-    });
+    })
+    .RequireRateLimiting("agent-read");
 
 app.MapPost(
     "/api/devices/register",
@@ -220,7 +343,7 @@ app.MapPost(
         var deviceIdentifier = string.IsNullOrWhiteSpace(registration.DeviceIdentifier)
             ? deviceId.ToString("D")
             : registration.DeviceIdentifier.Trim();
-        var deviceToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var deviceToken = DeviceTokenIssuer.Generate();
 
         try
         {
@@ -246,7 +369,74 @@ app.MapPost(
                 deviceId,
                 deviceIdentifier,
                 deviceToken));
-    });
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPut(
+    "/api/devices/{deviceId:guid}/block-state",
+    async (
+        Guid deviceId,
+        VkoMonitoring.Api.Models.DeviceBlockStateRequest blockState,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IDeviceAdministrationRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Device administration requires PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        var updated = await repository.SetBlockedAsync(
+            deviceId,
+            blockState.IsBlocked,
+            cancellationToken);
+        return updated
+            ? Results.Ok(new VkoMonitoring.Api.Models.DeviceBlockStateResult(
+                deviceId,
+                blockState.IsBlocked))
+            : Results.NotFound();
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPost(
+    "/api/devices/{deviceId:guid}/token/rotate",
+    async (
+        Guid deviceId,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IDeviceAdministrationRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Device administration requires PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        var deviceToken = DeviceTokenIssuer.Generate();
+        var updated = await repository.ReplaceTokenHashAsync(
+            deviceId,
+            DeviceTokenHasher.Hash(deviceToken),
+            cancellationToken);
+        return updated
+            ? Results.Ok(new VkoMonitoring.Api.Models.DeviceTokenRotationResult(deviceId, deviceToken))
+            : Results.NotFound();
+    })
+    .RequireRateLimiting("admin-write");
 
 app.MapPost(
     "/api/activation-codes",
@@ -296,7 +486,8 @@ app.MapPost(
         return Results.Created(
             "/api/activation-codes",
             new VkoMonitoring.Api.Models.ActivationCodeCreateResult(activationCode, expiresAtUtc));
-    });
+    })
+    .RequireRateLimiting("admin-write");
 
 app.MapPost(
     "/api/devices/activate",
@@ -329,7 +520,7 @@ app.MapPost(
         var deviceIdentifier = string.IsNullOrWhiteSpace(request.DeviceIdentifier)
             ? deviceId.ToString("D")
             : request.DeviceIdentifier.Trim();
-        var deviceToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var deviceToken = DeviceTokenIssuer.Generate();
 
         try
         {
@@ -386,7 +577,10 @@ app.MapPost(
             return Results.Unauthorized();
         }
 
-        var errors = MeasurementValidator.Validate(measurement);
+        var errors = MeasurementValidator.Validate(
+            measurement,
+            timeProvider.GetUtcNow(),
+            TimeSpan.FromMinutes(options.MaximumMeasurementClockSkewMinutes));
         if (errors.Count > 0)
         {
             return Results.ValidationProblem(errors);
@@ -413,7 +607,8 @@ app.MapPost(
         return wasCreated
             ? Results.Created($"/api/measurements/{measurement.EventId}", new { measurement.EventId })
             : Results.Ok(new { measurement.EventId, duplicate = true });
-    });
+    })
+    .RequireRateLimiting("agent-write");
 
 app.MapGet(
     "/api/incidents",
@@ -458,7 +653,8 @@ app.MapGet(
             toUtc,
             Math.Clamp(limit ?? 200, 1, 1_000),
             cancellationToken));
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/api/incidents/{incidentId:guid}",
@@ -483,7 +679,174 @@ app.MapGet(
 
         var incident = await repository.GetIncidentAsync(incidentId, cancellationToken);
         return incident is null ? Results.NotFound() : Results.Ok(incident);
-    });
+    })
+    .RequireRateLimiting("admin-read");
+
+app.MapPost(
+    "/api/incidents",
+    async (
+        VkoMonitoring.Api.Models.ManualIncidentCreateRequest incident,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IIncidentRepository repository,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Incidents require PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        var incidentAccess = MonitoringRequestAccess.From(request.HttpContext)!;
+        if (!incidentAccess.CanAccessLine(incident.LineId)) return Results.StatusCode(403);
+        incident = incident with { Actor = incidentAccess.Actor };
+        var errors = IncidentAdministrationValidator.Validate(incident, timeProvider.GetUtcNow());
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        var result = await repository.CreateManualIncidentAsync(incident, cancellationToken);
+        return result.Outcome switch
+        {
+            ManualIncidentCreationOutcome.Created => Results.Created(
+                $"/api/incidents/{result.IncidentId}",
+                new VkoMonitoring.Api.Models.ManualIncidentCreateResult(result.IncidentId!.Value)),
+            ManualIncidentCreationOutcome.BindingNotFound => Results.NotFound(new
+            {
+                error = "The school and internet line binding was not found."
+            }),
+            ManualIncidentCreationOutcome.OpenIncidentExists => Results.Conflict(new
+            {
+                error = "The internet line already has an active incident."
+            }),
+            _ => throw new InvalidOperationException("Unknown incident creation outcome.")
+        };
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPut(
+    "/api/incidents/{incidentId:guid}/status",
+    async (
+        Guid incidentId,
+        VkoMonitoring.Api.Models.IncidentStatusChangeRequest statusChange,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IIncidentRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Incidents require PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        statusChange = statusChange with { Actor = MonitoringRequestAccess.From(request.HttpContext)!.Actor };
+        var errors = IncidentAdministrationValidator.Validate(statusChange);
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        var outcome = await repository.ChangeStatusAsync(
+            incidentId,
+            statusChange,
+            cancellationToken);
+        return outcome switch
+        {
+            IncidentStatusChangeOutcome.Updated => Results.NoContent(),
+            IncidentStatusChangeOutcome.NotFound => Results.NotFound(),
+            IncidentStatusChangeOutcome.InvalidTransition => Results.Conflict(new
+            {
+                error = "The requested incident status transition is not allowed."
+            }),
+            _ => throw new InvalidOperationException("Unknown incident status change outcome.")
+        };
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPut(
+    "/api/incidents/{incidentId:guid}/assignment",
+    async (
+        Guid incidentId,
+        VkoMonitoring.Api.Models.IncidentAssignmentRequest assignment,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IIncidentRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Incidents require PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        assignment = assignment with { Actor = MonitoringRequestAccess.From(request.HttpContext)!.Actor };
+        var errors = IncidentAdministrationValidator.Validate(assignment);
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        return await repository.AssignAsync(incidentId, assignment, cancellationToken)
+            ? Results.NoContent()
+            : Results.NotFound();
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPost(
+    "/api/incidents/{incidentId:guid}/comments",
+    async (
+        Guid incidentId,
+        VkoMonitoring.Api.Models.IncidentCommentCreateRequest comment,
+        HttpRequest request,
+        TokenValidator tokenValidator,
+        IIncidentRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Incidents require PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        comment = comment with { Actor = MonitoringRequestAccess.From(request.HttpContext)!.Actor };
+        var errors = IncidentAdministrationValidator.Validate(comment);
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        return await repository.AddCommentAsync(incidentId, comment, cancellationToken)
+            ? Results.NoContent()
+            : Results.NotFound();
+    })
+    .RequireRateLimiting("admin-write");
 
 app.MapGet(
     "/api/measurements/recent",
@@ -502,7 +865,8 @@ app.MapGet(
 
         var safeLimit = Math.Clamp(limit ?? 100, 1, 1_000);
         return Results.Ok(await repository.GetRecentAsync(safeLimit, cancellationToken));
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/api/schools",
@@ -518,7 +882,8 @@ app.MapGet(
         }
 
         return Results.Ok(await repository.GetSchoolsAsync(cancellationToken));
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/api/schools/{schoolId:guid}",
@@ -536,7 +901,8 @@ app.MapGet(
 
         var school = await repository.GetSchoolAsync(schoolId, cancellationToken);
         return school is null ? Results.NotFound() : Results.Ok(school);
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/api/schools/{schoolId:guid}/devices",
@@ -558,7 +924,8 @@ app.MapGet(
         }
 
         return Results.Ok(await repository.GetSchoolDevicesAsync(schoolId, cancellationToken));
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/api/devices/{deviceId:guid}/measurements",
@@ -594,7 +961,8 @@ app.MapGet(
             toUtc,
             Math.Clamp(limit ?? 500, 1, 5_000),
             cancellationToken));
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/api/analytics",
@@ -628,7 +996,8 @@ app.MapGet(
             fromUtc,
             toUtc,
             cancellationToken));
-    });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapGet(
     "/speed/download",
@@ -647,7 +1016,8 @@ app.MapGet(
             await response.Body.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
             remaining -= count;
         }
-    });
+    })
+    .RequireRateLimiting("speed-test");
 
 app.MapPost(
     "/speed/upload",
@@ -671,7 +1041,8 @@ app.MapPost(
         }
 
         return Results.NoContent();
-    });
+    })
+    .RequireRateLimiting("speed-test");
 
 app.Run();
 

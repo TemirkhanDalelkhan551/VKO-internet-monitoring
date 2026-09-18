@@ -25,17 +25,33 @@ public sealed class JsonFileMonitoringReadRepository(
 
         foreach (var group in options.DeviceBindings.GroupBy(pair => pair.Value.SchoolId))
         {
-            var latest = measurements
-                .Where(measurement => measurement.SchoolId == group.Key)
-                .OrderByDescending(measurement => measurement.MeasuredAtUtc)
-                .FirstOrDefault();
             var firstBinding = group.First().Value;
-            var activeAfter = timeProvider.GetUtcNow() - TimeSpan.FromMinutes(options.DeviceActiveWindowMinutes);
+            var now = timeProvider.GetUtcNow();
+            var activeAfter = now - TimeSpan.FromMinutes(options.DeviceActiveWindowMinutes);
             var activeCount = group.Count(pair =>
                 heartbeats.TryGetValue(Guid.Parse(pair.Key), out var heartbeat) &&
                 heartbeat.SentAtUtc >= activeAfter);
 
-            schools.Add(new SchoolOverview(
+            var lines = group.GroupBy(pair => pair.Value.LineId).Select(lineGroup =>
+            {
+                var binding = lineGroup.OrderBy(pair => pair.Key, StringComparer.Ordinal).First().Value;
+                var latest = measurements.Where(measurement =>
+                    measurement.SchoolId == group.Key && measurement.LineId == lineGroup.Key)
+                    .OrderByDescending(measurement => measurement.MeasuredAtUtc)
+                    .ThenBy(measurement => measurement.EventId).FirstOrDefault();
+                var lineHeartbeats = lineGroup.Select(pair =>
+                    heartbeats.GetValueOrDefault(Guid.Parse(pair.Key))).OfType<AgentHeartbeat>().ToArray();
+                DateTimeOffset? lastSeen = lineHeartbeats.Length == 0 ? null :
+                    lineHeartbeats.Max(heartbeat => heartbeat.SentAtUtc);
+                return MonitoringOverviewFactory.WithCurrentState(new LineOverview(
+                    group.Key, lineGroup.Key, RequiredOrFallback(binding.LineName, lineGroup.Key.ToString("D")),
+                    binding.LineStatus, null, null, null, null,
+                    lineGroup.Count(), lineHeartbeats.Count(heartbeat => heartbeat.SentAtUtc >= activeAfter),
+                    lastSeen, MonitoringStatusEvaluator.Evaluate(latest, options.Thresholds), ToSnapshot(latest)),
+                    now, options);
+            }).OrderBy(line => line.Name, StringComparer.Ordinal).ThenBy(line => line.LineId).ToArray();
+
+            schools.Add(MonitoringOverviewFactory.WithLines(new SchoolOverview(
                 group.Key,
                 RequiredOrFallback(firstBinding.SchoolName, group.Key.ToString("D")),
                 null,
@@ -46,8 +62,8 @@ public sealed class JsonFileMonitoringReadRepository(
                 null,
                 group.Count(),
                 activeCount,
-                MonitoringStatusEvaluator.Evaluate(latest, options.Thresholds),
-                ToSnapshot(latest)));
+                MonitoringStatus.Unknown,
+                null), lines));
         }
 
         return schools.OrderBy(school => school.Name).ToArray();
@@ -75,11 +91,12 @@ public sealed class JsonFileMonitoringReadRepository(
             }
 
             var latest = measurements
-                .Where(measurement => measurement.DeviceId == deviceId)
+                .Where(measurement => measurement.DeviceId == deviceId &&
+                    measurement.SchoolId == schoolId && measurement.LineId == binding.LineId)
                 .OrderByDescending(measurement => measurement.MeasuredAtUtc)
                 .FirstOrDefault();
             heartbeats.TryGetValue(deviceId, out var heartbeat);
-            devices.Add(new DeviceOverview(
+            devices.Add(MonitoringOverviewFactory.WithCurrentState(new DeviceOverview(
                 deviceId,
                 binding.LineId,
                 deviceIdentifier,
@@ -90,7 +107,7 @@ public sealed class JsonFileMonitoringReadRepository(
                 heartbeat?.AgentVersion,
                 false,
                 MonitoringStatusEvaluator.Evaluate(latest, options.Thresholds),
-                ToSnapshot(latest)));
+                ToSnapshot(latest)), timeProvider.GetUtcNow(), options));
         }
 
         return devices.OrderBy(device => device.Name).ToArray();

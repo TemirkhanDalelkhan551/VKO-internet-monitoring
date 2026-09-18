@@ -1,3 +1,5 @@
+using System.Net;
+using Microsoft.AspNetCore.Http;
 using VkoMonitoring.Agent.Core.Domain;
 using VkoMonitoring.Api.Configuration;
 using VkoMonitoring.Api.Health;
@@ -81,6 +83,25 @@ public sealed class ApiComponentsTests : IDisposable
         Assert.Contains("Device binding is missing", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("CHANGE_ME_ADMIN_TOKEN")]
+    public void OptionsValidator_RejectsMissingOrPlaceholderAdminToken(string adminToken)
+    {
+        var options = new MonitoringApiOptions
+        {
+            AdminToken = adminToken,
+            StorageProvider = "PostgreSql"
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MonitoringApiOptionsValidator.Validate(
+                options,
+                "Host=localhost;Database=monitoring;Username=monitoring;Password=test"));
+
+        Assert.Contains("AdminToken", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void OptionsValidator_AllowsDatabaseRegisteredDevicesWithoutConfigurationTokens()
     {
@@ -96,6 +117,61 @@ public sealed class ApiComponentsTests : IDisposable
     }
 
     [Fact]
+    public void PostgresConnectionStringResolver_PreservesNpgsqlConnectionString()
+    {
+        const string connectionString =
+            "Host=localhost;Port=55432;Database=monitoring;Username=monitoring;Password=test";
+
+        Assert.Equal(connectionString, PostgresConnectionStringResolver.Resolve(connectionString));
+    }
+
+    [Fact]
+    public void PostgresConnectionStringResolver_ConvertsRenderDatabaseUrl()
+    {
+        var resolved = PostgresConnectionStringResolver.Resolve(
+            "postgresql://render_user:p%40ss%3Aword@database.internal:5433/vko_monitoring");
+        var parsed = new Npgsql.NpgsqlConnectionStringBuilder(resolved);
+
+        Assert.Equal("database.internal", parsed.Host);
+        Assert.Equal(5433, parsed.Port);
+        Assert.Equal("vko_monitoring", parsed.Database);
+        Assert.Equal("render_user", parsed.Username);
+        Assert.Equal("p@ss:word", parsed.Password);
+        Assert.Equal("VkoMonitoring.Api", parsed.ApplicationName);
+    }
+
+    [Theory]
+    [InlineData("postgresql://database.internal/vko_monitoring")]
+    [InlineData("postgresql://user:password@database.internal/")]
+    public void PostgresConnectionStringResolver_RejectsIncompleteDatabaseUrl(string databaseUrl)
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            PostgresConnectionStringResolver.Resolve(databaseUrl));
+    }
+
+    [Theory]
+    [InlineData("203.0.113.10", "203.0.113.10")]
+    [InlineData("::ffff:203.0.113.11", "203.0.113.11")]
+    public void ClientRateLimitPartition_NormalizesClientAddress(string address, string expected)
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse(address);
+
+        Assert.Equal(expected, ClientRateLimitPartition.GetKey(context));
+    }
+
+    [Fact]
+    public void RequestBodySizePolicy_UsesSeparateApiAndSpeedLimits()
+    {
+        Assert.Equal(
+            RequestBodySizePolicy.MaximumApiRequestBytes,
+            RequestBodySizePolicy.GetMaximumBytes("/api/measurements", 5_000_000));
+        Assert.Equal(
+            5_000_000,
+            RequestBodySizePolicy.GetMaximumBytes("/speed/upload", 5_000_000));
+    }
+
+    [Fact]
     public void DeviceTokenHasher_IsDeterministicAndDoesNotStorePlainToken()
     {
         const string token = "sensitive-device-token";
@@ -106,6 +182,17 @@ public sealed class ApiComponentsTests : IDisposable
         Assert.Equal(first, second);
         Assert.Equal(32, first.Length);
         Assert.DoesNotContain(token, Convert.ToHexString(first), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeviceTokenIssuer_GeneratesIndependent256BitTokens()
+    {
+        var first = DeviceTokenIssuer.Generate();
+        var second = DeviceTokenIssuer.Generate();
+
+        Assert.NotEqual(first, second);
+        Assert.Equal(32, Convert.FromBase64String(first).Length);
+        Assert.Equal(32, Convert.FromBase64String(second).Length);
     }
 
     [Theory]
@@ -160,7 +247,7 @@ public sealed class ApiComponentsTests : IDisposable
         };
         measurement = measurement with { EventId = Guid.Empty };
 
-        var errors = MeasurementValidator.Validate(measurement);
+        var errors = MeasurementValidator.Validate(measurement, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5));
 
         Assert.Contains(nameof(measurement.EventId), errors.Keys);
         Assert.Contains(nameof(measurement.DownloadMbps), errors.Keys);

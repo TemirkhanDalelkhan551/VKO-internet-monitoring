@@ -12,6 +12,10 @@ public sealed class MonitoringApiOptions
     public QualityThresholdOptions Thresholds { get; init; } = new();
     public IncidentDetectionOptions Incidents { get; init; } = new();
     public int DeviceActiveWindowMinutes { get; init; } = 15;
+    public int MeasurementFreshnessMinutes { get; init; } = 1_440;
+    public bool EnableLegacyAdminToken { get; init; } = true;
+    public int UserSessionLifetimeMinutes { get; init; } = 480;
+    public int MaximumMeasurementClockSkewMinutes { get; init; } = 5;
     public int MaximumSpeedTestBytes { get; init; } = 20_000_000;
     public int ReadinessDegradedAfterMilliseconds { get; init; } = 1_000;
 }
@@ -31,6 +35,7 @@ public sealed class DeviceBindingOptions
     public string SchoolName { get; init; } = string.Empty;
     public string DeviceName { get; init; } = string.Empty;
     public string LineName { get; init; } = string.Empty;
+    public string LineStatus { get; init; } = "Primary";
 }
 
 public sealed class QualityThresholdOptions

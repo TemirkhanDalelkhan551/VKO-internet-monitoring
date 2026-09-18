@@ -4,52 +4,36 @@ using VkoMonitoring.Agent.Core.Domain;
 using VkoMonitoring.Api.Configuration;
 using VkoMonitoring.Api.Models;
 using VkoMonitoring.Api.Services;
+using VkoMonitoring.Api.Security;
 
 namespace VkoMonitoring.Api.Persistence;
 
 public sealed class PostgresMonitoringReadRepository(
     NpgsqlDataSource dataSource,
-    MonitoringApiOptions options) : IMonitoringReadRepository
+    MonitoringApiOptions options,
+    TimeProvider timeProvider,
+    MonitoringAccessContext access) : IMonitoringReadRepository
 {
     private const string SchoolSelect = """
         SELECT s.id, s.name, s.district_city, s.address,
-               line.provider_name, line.connection_type,
-               line.contracted_download_mbps, line.contracted_upload_mbps,
-               (SELECT COUNT(*)::int FROM devices d WHERE d.school_id = s.id),
+               (SELECT COUNT(*)::int FROM devices d WHERE d.school_id = s.id AND /* device access */),
                (SELECT COUNT(*)::int FROM devices d
                 WHERE d.school_id = s.id
+                  AND /* device access */
                   AND d.is_blocked = false
-                  AND d.last_seen_at_utc >= now() - ($1 * interval '1 minute')),
-               latest.event_id, latest.measured_at_utc,
-               latest.download_mbps, latest.upload_mbps, latest.ping_milliseconds,
-               latest.jitter_milliseconds, latest.packet_loss_percent,
-               latest.connection_status, latest.device_id, latest.line_id
+                  AND d.last_seen_at_utc >= now() - ($1 * interval '1 minute'))
         FROM schools s
-        LEFT JOIN LATERAL (
-            SELECT l.provider_name, l.connection_type,
-                   l.contracted_download_mbps, l.contracted_upload_mbps
-            FROM internet_lines l
-            WHERE l.school_id = s.id
-            ORDER BY CASE l.status WHEN 'Primary' THEN 0 WHEN 'Backup' THEN 1 ELSE 2 END,
-                     l.created_at_utc
-            LIMIT 1
-        ) line ON true
-        LEFT JOIN LATERAL (
-            SELECT m.event_id, m.device_id, m.line_id, m.measured_at_utc,
-                   m.download_mbps, m.upload_mbps, m.ping_milliseconds,
-                   m.jitter_milliseconds, m.packet_loss_percent,
-                   m.connection_status
-            FROM measurements m
-            WHERE m.school_id = s.id
-            ORDER BY m.measured_at_utc DESC
-            LIMIT 1
-        ) latest ON true
+        WHERE /* school access */
         """;
+
+    private string ScopedSchoolSelect => SchoolSelect.Replace("/* device access */", access.SqlCondition("d.line_id"))
+        .Replace("/* school access */", access.Current?.AllowedLineIds is null ? "true" :
+            $"EXISTS (SELECT 1 FROM internet_lines l WHERE l.school_id=s.id AND {access.SqlCondition("l.id")})");
 
     public async Task<IReadOnlyList<SchoolOverview>> GetSchoolsAsync(
         CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand(SchoolSelect + " ORDER BY s.name;");
+        await using var command = dataSource.CreateCommand(ScopedSchoolSelect + " ORDER BY s.name;");
         command.Parameters.AddWithValue(options.DeviceActiveWindowMinutes);
         return await ReadSchoolsAsync(command, cancellationToken);
     }
@@ -58,7 +42,7 @@ public sealed class PostgresMonitoringReadRepository(
         Guid schoolId,
         CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand(SchoolSelect + " WHERE s.id = $2;");
+        await using var command = dataSource.CreateCommand(ScopedSchoolSelect + " AND s.id = $2;");
         command.Parameters.AddWithValue(options.DeviceActiveWindowMinutes);
         command.Parameters.AddWithValue(schoolId);
         return (await ReadSchoolsAsync(command, cancellationToken)).SingleOrDefault();
@@ -82,15 +66,16 @@ public sealed class PostgresMonitoringReadRepository(
                        m.jitter_milliseconds, m.packet_loss_percent,
                        m.connection_status
                 FROM measurements m
-                WHERE m.device_id = d.id
+                WHERE m.device_id = d.id AND m.line_id = d.line_id AND m.school_id = d.school_id
                 ORDER BY m.measured_at_utc DESC
                 LIMIT 1
             ) latest ON true
             WHERE d.school_id = $1
+              AND /* access */
             ORDER BY d.name;
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("d.line_id")));
         command.Parameters.AddWithValue(schoolId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var devices = new List<DeviceOverview>();
@@ -100,7 +85,7 @@ public sealed class PostgresMonitoringReadRepository(
             var deviceId = reader.GetGuid(0);
             var lineId = reader.GetGuid(1);
             var measurement = ReadLatestMeasurement(reader, 9, schoolId, deviceId, lineId);
-            devices.Add(new DeviceOverview(
+            devices.Add(MonitoringOverviewFactory.WithCurrentState(new DeviceOverview(
                 deviceId,
                 lineId,
                 reader.GetString(2),
@@ -111,7 +96,7 @@ public sealed class PostgresMonitoringReadRepository(
                 GetNullableString(reader, 7),
                 reader.GetBoolean(8),
                 MonitoringStatusEvaluator.Evaluate(measurement, options.Thresholds),
-                ToSnapshot(measurement)));
+                ToSnapshot(measurement)), timeProvider.GetUtcNow(), options));
         }
 
         return devices;
@@ -149,13 +134,14 @@ public sealed class PostgresMonitoringReadRepository(
                    external_ip_address, network_connection_type, measurement_server
             FROM measurements
             WHERE device_id = $1
+              AND /* access */
               AND measured_at_utc >= $2
               AND measured_at_utc < $3
             ORDER BY measured_at_utc DESC
             LIMIT $4;
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("line_id")));
         command.Parameters.AddWithValue(deviceId);
         command.Parameters.AddWithValue(fromUtc);
         command.Parameters.AddWithValue(toUtc);
@@ -193,10 +179,11 @@ public sealed class PostgresMonitoringReadRepository(
             FROM measurements
             WHERE measured_at_utc >= $1
               AND measured_at_utc < $2
-              AND ($3::uuid IS NULL OR school_id = $3);
+              AND ($3::uuid IS NULL OR school_id = $3)
+              AND /* access */;
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("line_id")));
         command.Parameters.AddWithValue(fromUtc);
         command.Parameters.AddWithValue(toUtc);
         command.Parameters.Add(new NpgsqlParameter
@@ -232,34 +219,85 @@ public sealed class PostgresMonitoringReadRepository(
         NpgsqlCommand command,
         CancellationToken cancellationToken)
     {
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var schools = new List<SchoolOverview>();
-
-        while (await reader.ReadAsync(cancellationToken))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
-            var schoolId = reader.GetGuid(0);
-            var measurement = ReadLatestMeasurement(
-                reader,
-                10,
-                schoolId,
-                reader.IsDBNull(18) ? Guid.Empty : reader.GetGuid(18),
-                reader.IsDBNull(19) ? Guid.Empty : reader.GetGuid(19));
-            schools.Add(new SchoolOverview(
-                schoolId,
-                reader.GetString(1),
-                GetNullableString(reader, 2),
-                GetNullableString(reader, 3),
-                GetNullableString(reader, 4),
-                GetNullableString(reader, 5),
-                GetNullableDouble(reader, 6),
-                GetNullableDouble(reader, 7),
-                reader.GetInt32(8),
-                reader.GetInt32(9),
-                MonitoringStatusEvaluator.Evaluate(measurement, options.Thresholds),
-                ToSnapshot(measurement)));
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                schools.Add(new SchoolOverview(
+                    reader.GetGuid(0), reader.GetString(1),
+                    GetNullableString(reader, 2), GetNullableString(reader, 3),
+                    null, null, null, null, reader.GetInt32(4), reader.GetInt32(5),
+                    MonitoringStatus.Unknown, null));
+            }
         }
 
-        return schools;
+        if (schools.Count == 0)
+        {
+            return schools;
+        }
+
+        var lines = await GetLinesAsync(schools.Count == 1 ? schools[0].SchoolId : null, cancellationToken);
+        var linesBySchool = lines.ToLookup(line => line.SchoolId);
+        return schools.Select(school => MonitoringOverviewFactory.WithLines(
+            school, linesBySchool[school.SchoolId].ToArray())).ToArray();
+    }
+
+    private async Task<IReadOnlyList<LineOverview>> GetLinesAsync(
+        Guid? schoolId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT l.school_id, l.id, l.name, l.status, l.provider_name, l.connection_type,
+                   l.contracted_download_mbps, l.contracted_upload_mbps,
+                   presence.device_count, presence.active_count, presence.last_seen,
+                   latest.event_id, latest.measured_at_utc, latest.download_mbps,
+                   latest.upload_mbps, latest.ping_milliseconds, latest.jitter_milliseconds,
+                   latest.packet_loss_percent, latest.connection_status, latest.device_id
+            FROM internet_lines l
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*)::int AS device_count,
+                       COUNT(*) FILTER (WHERE NOT d.is_blocked AND d.last_seen_at_utc >= $1)::int AS active_count,
+                       MAX(d.last_seen_at_utc) FILTER (WHERE NOT d.is_blocked) AS last_seen
+                FROM devices d WHERE d.line_id = l.id AND d.school_id = l.school_id
+            ) presence ON true
+            LEFT JOIN LATERAL (
+                SELECT m.event_id, m.device_id, m.measured_at_utc, m.download_mbps,
+                       m.upload_mbps, m.ping_milliseconds, m.jitter_milliseconds,
+                       m.packet_loss_percent, m.connection_status
+                FROM measurements m
+                WHERE m.line_id = l.id AND m.school_id = l.school_id
+                ORDER BY m.measured_at_utc DESC, m.received_at_utc DESC, m.event_id
+                LIMIT 1
+            ) latest ON true
+            WHERE ($2::uuid IS NULL OR l.school_id = $2) AND /* access */
+            ORDER BY l.school_id, l.name, l.id;
+            """;
+        var now = timeProvider.GetUtcNow();
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("l.id")));
+        command.Parameters.AddWithValue(now.AddMinutes(-options.DeviceActiveWindowMinutes));
+        command.Parameters.Add(new NpgsqlParameter
+        {
+            NpgsqlDbType = NpgsqlDbType.Uuid,
+            Value = schoolId is null ? DBNull.Value : schoolId.Value
+        });
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var lines = new List<LineOverview>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var lineSchoolId = reader.GetGuid(0);
+            var lineId = reader.GetGuid(1);
+            var measurement = ReadLatestMeasurement(reader, 11, lineSchoolId,
+                reader.IsDBNull(19) ? Guid.Empty : reader.GetGuid(19), lineId);
+            lines.Add(MonitoringOverviewFactory.WithCurrentState(new LineOverview(
+                lineSchoolId, lineId, reader.GetString(2), reader.GetString(3),
+                GetNullableString(reader, 4), GetNullableString(reader, 5),
+                GetNullableDouble(reader, 6), GetNullableDouble(reader, 7),
+                reader.GetInt32(8), reader.GetInt32(9), GetNullableDateTimeOffset(reader, 10),
+                MonitoringStatusEvaluator.Evaluate(measurement, options.Thresholds),
+                ToSnapshot(measurement)), now, options));
+        }
+
+        return lines;
     }
 
     private static InternetMeasurement? ReadLatestMeasurement(

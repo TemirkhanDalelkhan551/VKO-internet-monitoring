@@ -12,6 +12,12 @@ public enum MonitoringStatus
     NoConnection
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<MeasurementFreshness>))]
+public enum MeasurementFreshness { Missing, Fresh, Stale }
+
+[JsonConverter(typeof(JsonStringEnumConverter<AgentPresence>))]
+public enum AgentPresence { NotSeen, Active, Inactive, Blocked }
+
 public sealed record MeasurementSnapshot(
     double? DownloadMbps,
     double? UploadMbps,
@@ -32,7 +38,14 @@ public sealed record SchoolOverview(
     int DeviceCount,
     int ActiveDeviceCount,
     MonitoringStatus Status,
-    MeasurementSnapshot? LatestMeasurement);
+    MeasurementSnapshot? LatestMeasurement)
+{
+    public Guid? PrimaryLineId { get; init; }
+    public MonitoringStatus QualityStatus { get; init; }
+    public MeasurementFreshness MeasurementFreshness { get; init; }
+    public AgentPresence AgentPresence { get; init; }
+    public IReadOnlyList<LineOverview> Lines { get; init; } = [];
+}
 
 public sealed record DeviceOverview(
     Guid DeviceId,
@@ -45,7 +58,32 @@ public sealed record DeviceOverview(
     string? AgentVersion,
     bool IsBlocked,
     MonitoringStatus Status,
-    MeasurementSnapshot? LatestMeasurement);
+    MeasurementSnapshot? LatestMeasurement)
+{
+    public MonitoringStatus QualityStatus { get; init; }
+    public MeasurementFreshness MeasurementFreshness { get; init; }
+    public AgentPresence AgentPresence { get; init; }
+}
+
+public sealed record LineOverview(
+    Guid SchoolId,
+    Guid LineId,
+    string Name,
+    string LineStatus,
+    string? ProviderName,
+    string? ConnectionType,
+    double? ContractedDownloadMbps,
+    double? ContractedUploadMbps,
+    int DeviceCount,
+    int ActiveDeviceCount,
+    DateTimeOffset? LastSeenAtUtc,
+    MonitoringStatus Status,
+    MeasurementSnapshot? LatestMeasurement)
+{
+    public MonitoringStatus QualityStatus { get; init; }
+    public MeasurementFreshness MeasurementFreshness { get; init; }
+    public AgentPresence AgentPresence { get; init; }
+}
 
 public sealed record LocalDeviceStatus(
     DeviceOverview Device,

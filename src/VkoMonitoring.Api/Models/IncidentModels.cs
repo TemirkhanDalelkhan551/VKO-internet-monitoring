@@ -35,7 +35,9 @@ public sealed record IncidentOverview(
     string Description,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset DetectedAtUtc,
+    DateTimeOffset? SentToProviderAtUtc,
     DateTimeOffset? RecoveredAtUtc,
+    DateTimeOffset? ClosedAtUtc,
     long DurationSeconds,
     Guid? LatestMeasurementEventId,
     string? AssignedTo);
@@ -52,3 +54,48 @@ public sealed record IncidentHistoryEntry(
 public sealed record IncidentDetails(
     IncidentOverview Incident,
     IReadOnlyList<IncidentHistoryEntry> History);
+
+public sealed record ManualIncidentCreateRequest(
+    Guid SchoolId,
+    Guid LineId,
+    string ProblemType,
+    string Title,
+    string Description,
+    DateTimeOffset? StartedAtUtc,
+    string? AssignedTo,
+    string Actor,
+    string? Comment);
+
+public sealed record ManualIncidentCreateResult(Guid IncidentId);
+
+public sealed record IncidentStatusChangeRequest(
+    IncidentStatus Status,
+    string Actor,
+    string? Comment);
+
+public sealed record IncidentAssignmentRequest(
+    string? AssignedTo,
+    string Actor,
+    string? Comment);
+
+public sealed record IncidentCommentCreateRequest(
+    string Comment,
+    string Actor);
+
+public enum ManualIncidentCreationOutcome
+{
+    Created,
+    BindingNotFound,
+    OpenIncidentExists
+}
+
+public sealed record ManualIncidentCreationResult(
+    ManualIncidentCreationOutcome Outcome,
+    Guid? IncidentId);
+
+public enum IncidentStatusChangeOutcome
+{
+    Updated,
+    NotFound,
+    InvalidTransition
+}

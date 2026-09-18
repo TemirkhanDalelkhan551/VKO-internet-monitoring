@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#143c36">
+  <title>Мониторинг интернета · ВКО</title>
+  <link rel="icon" href="/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <section id="login-view" class="login-view" aria-label="Вход в систему">
+    <div class="login-story">
+      <div class="brand"><img src="/mark.svg" alt="" width="40" height="40"><span>ВКО<span class="brand-sub">Мониторинг интернета</span></span></div>
+      <div class="story-copy"><p class="eyebrow">Организации образования</p><h1>Связь, которую<br> видно.</h1><p>Показатели интернета, состояние линий и связь с устройствами школ — в одной системе.</p></div>
+      <div class="signal-art" aria-hidden="true"><span class="signal-ring ring-one"></span><span class="signal-ring ring-two"></span><span class="signal-ring ring-three"></span><span class="signal-center"></span><span class="signal-node node-one"></span><span class="signal-node node-two"></span><span class="signal-node node-three"></span></div>
+      <p class="story-footer">Восточно-Казахстанская область</p>
+    </div>
+    <div class="login-panel"><div class="login-box">
+      <p class="eyebrow muted">Панель мониторинга</p><h2>Вход в систему</h2><p class="lead">Используйте учётную запись вашей организации.</p>
+      <form id="login-form">
+        <label for="login">Логин</label><input id="login" name="login" autocomplete="username" required maxlength="64" placeholder="Ваш логин" spellcheck="false" autocapitalize="none">
+        <label for="password">Пароль</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="Ваш пароль"><button id="show-password" class="password-toggle" type="button" aria-label="Показать пароль" aria-pressed="false">Показать</button></div>
+        <div id="login-message" class="message" role="alert" hidden></div>
+        <button id="login-submit" class="button primary" type="submit">Войти в систему <span aria-hidden="true">→</span></button>
+      </form>
+      <div class="login-note"><span class="note-dot" aria-hidden="true"></span><p>Доступ к школам и линиям определяется вашей ролью. Для получения учётной записи обратитесь к администратору.</p></div>
+    </div></div>
+  </section>
+
+  <div id="dashboard-view" class="dashboard" hidden>
+    <aside class="sidebar">
+      <div class="brand"><img src="/mark.svg" alt="" width="36" height="36"><span>ВКО<span class="brand-sub">Мониторинг интернета</span></span></div>
+      <p class="nav-label">Рабочее пространство</p><a class="nav-item selected" href="/" aria-current="page"><span aria-hidden="true">▦</span> Школы и линии</a>
+      <div class="sidebar-bottom"><p class="nav-label">Область доступа</p><p id="access-description" class="access-description"></p><div class="account"><div id="user-avatar" class="avatar" aria-hidden="true"></div><div><strong id="user-name"></strong><span id="user-role"></span></div></div><button id="logout" class="logout" type="button">Выйти из системы <span aria-hidden="true">↗</span></button></div>
+    </aside>
+    <main class="main">
+      <header class="page-header"><div><p class="breadcrumb">Восточно-Казахстанская область <span>/</span> Обзор</p><h1>Школы и линии</h1><p class="page-subtitle">Текущее состояние интернета в вашей области доступа.</p></div><div class="refresh-area"><button id="refresh" class="button secondary" type="button"><span aria-hidden="true">↻</span> Обновить</button><span id="updated-at" class="updated-at" aria-live="polite"></span></div></header>
+      <div id="dashboard-message" class="message" role="alert" hidden></div>
+      <section id="summary" class="summary" aria-label="Сводные показатели"></section>
+      <section class="schools-panel" aria-labelledby="schools-title">
+        <div class="panel-heading"><div><h2 id="schools-title">Организации образования <span id="school-count" class="count"></span></h2><p>Сводка школы относится к основной линии. Другие линии можно раскрыть в списке.</p></div></div>
+        <div class="filters"><div class="search-field"><label for="search" class="visually-hidden">Поиск школы, района или поставщика</label><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Школа, район или поставщик" autocomplete="off"></div><div><label for="district-filter" class="visually-hidden">Район или город</label><select id="district-filter"><option value="">Все районы и города</option></select></div><div><label for="status-filter" class="visually-hidden">Статус основной линии</label><select id="status-filter"><option value="">Все статусы</option><option value="Normal">Норма</option><option value="Unstable">Нестабильно</option><option value="Critical">Критично</option><option value="NoConnection">Нет соединения</option><option value="Unknown">Нет актуальной оценки</option></select></div><button id="reset-filters" class="text-button" type="button" hidden>Сбросить</button></div>
+        <p id="result-count" class="result-count" aria-live="polite"></p>
+        <div class="table-scroll"><table><caption class="visually-hidden">Школы, показатели основной линии и активность устройств</caption><thead><tr><th scope="col">Школа / район</th><th scope="col">Основная линия</th><th scope="col">Статус / агент</th><th scope="col">Download</th><th scope="col">Upload</th><th scope="col">Ping</th><th scope="col">Последний замер</th><th scope="col">Устройства</th></tr></thead><tbody id="school-rows"></tbody></table></div>
+        <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">▦</span><h3 id="empty-title"></h3><p id="empty-description"></p></div>
+        <div class="panel-footer"><span><i class="legend-dot green"></i> Качество интернета</span><span><i class="legend-dot gray"></i> Связь с агентом отображается отдельно</span><span class="auto-update">Автообновление раз в минуту</span></div>
+      </section>
+      <footer class="page-footer">Автономный мониторинг интернета <span>ВКО · Организации образования</span></footer>
+    </main>
+  </div>
+  <noscript><p class="noscript">Для работы панели включите JavaScript в браузере.</p></noscript>
+</body>
+</html>

@@ -15,4 +15,23 @@ public interface IIncidentRepository
         CancellationToken cancellationToken);
 
     Task<IncidentDetails?> GetIncidentAsync(Guid incidentId, CancellationToken cancellationToken);
+
+    Task<ManualIncidentCreationResult> CreateManualIncidentAsync(
+        ManualIncidentCreateRequest request,
+        CancellationToken cancellationToken);
+
+    Task<IncidentStatusChangeOutcome> ChangeStatusAsync(
+        Guid incidentId,
+        IncidentStatusChangeRequest request,
+        CancellationToken cancellationToken);
+
+    Task<bool> AssignAsync(
+        Guid incidentId,
+        IncidentAssignmentRequest request,
+        CancellationToken cancellationToken);
+
+    Task<bool> AddCommentAsync(
+        Guid incidentId,
+        IncidentCommentCreateRequest request,
+        CancellationToken cancellationToken);
 }

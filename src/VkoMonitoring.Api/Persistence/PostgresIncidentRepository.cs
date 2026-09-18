@@ -5,13 +5,15 @@ using VkoMonitoring.Agent.Core.Domain;
 using VkoMonitoring.Api.Configuration;
 using VkoMonitoring.Api.Models;
 using VkoMonitoring.Api.Services;
+using VkoMonitoring.Api.Security;
 
 namespace VkoMonitoring.Api.Persistence;
 
 public sealed class PostgresIncidentRepository(
     NpgsqlDataSource dataSource,
     MonitoringApiOptions options,
-    TimeProvider timeProvider) : IIncidentRepository
+    TimeProvider timeProvider,
+    MonitoringAccessContext access) : IIncidentRepository
 {
     public async Task ProcessLatestMeasurementAsync(
         Guid lineId,
@@ -73,14 +75,16 @@ public sealed class PostgresIncidentRepository(
                    'INC-' || lpad(i.incident_number::text, 6, '0'),
                    i.school_id, s.name, i.line_id, l.name, l.provider_name,
                    i.source, i.problem_type, i.status, i.title, i.description,
-                   i.started_at_utc, i.detected_at_utc, i.recovered_at_utc,
+                   i.started_at_utc, i.detected_at_utc, i.sent_to_provider_at_utc,
+                   i.recovered_at_utc, i.closed_at_utc,
                    greatest(0, floor(extract(epoch FROM
-                       (coalesce(i.recovered_at_utc, now()) - i.started_at_utc))))::bigint,
+                       (coalesce(i.recovered_at_utc, i.closed_at_utc, now()) - i.started_at_utc))))::bigint,
                    i.latest_measurement_event_id, i.assigned_to
             FROM incidents i
             JOIN schools s ON s.id = i.school_id
             JOIN internet_lines l ON l.id = i.line_id
             WHERE ($1::uuid IS NULL OR i.school_id = $1)
+              AND /* access */
               AND ($2::text IS NULL OR i.status = $2)
               AND i.started_at_utc >= $3
               AND i.started_at_utc < $4
@@ -88,7 +92,7 @@ public sealed class PostgresIncidentRepository(
             LIMIT $5;
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("i.line_id")));
         AddNullableParameter(command, NpgsqlDbType.Uuid, schoolId);
         AddNullableParameter(command, NpgsqlDbType.Text, status?.ToString());
         command.Parameters.AddWithValue(fromUtc);
@@ -113,14 +117,15 @@ public sealed class PostgresIncidentRepository(
                    'INC-' || lpad(i.incident_number::text, 6, '0'),
                    i.school_id, s.name, i.line_id, l.name, l.provider_name,
                    i.source, i.problem_type, i.status, i.title, i.description,
-                   i.started_at_utc, i.detected_at_utc, i.recovered_at_utc,
+                   i.started_at_utc, i.detected_at_utc, i.sent_to_provider_at_utc,
+                   i.recovered_at_utc, i.closed_at_utc,
                    greatest(0, floor(extract(epoch FROM
-                       (coalesce(i.recovered_at_utc, now()) - i.started_at_utc))))::bigint,
+                       (coalesce(i.recovered_at_utc, i.closed_at_utc, now()) - i.started_at_utc))))::bigint,
                    i.latest_measurement_event_id, i.assigned_to
             FROM incidents i
             JOIN schools s ON s.id = i.school_id
             JOIN internet_lines l ON l.id = i.line_id
-            WHERE i.id = $1;
+            WHERE i.id = $1 AND /* access */;
             """;
         const string historySql = """
             SELECT id, occurred_at_utc, action, previous_status, new_status, comment, actor
@@ -130,7 +135,7 @@ public sealed class PostgresIncidentRepository(
             """;
 
         IncidentOverview? incident;
-        await using (var command = dataSource.CreateCommand(incidentSql))
+        await using (var command = dataSource.CreateCommand(incidentSql.Replace("/* access */", access.SqlCondition("i.line_id"))))
         {
             command.Parameters.AddWithValue(incidentId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -161,6 +166,238 @@ public sealed class PostgresIncidentRepository(
         }
 
         return new IncidentDetails(incident, history);
+    }
+
+    public async Task<ManualIncidentCreationResult> CreateManualIncidentAsync(
+        ManualIncidentCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        const string bindingSql = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM internet_lines
+                WHERE id = $1 AND school_id = $2);
+            """;
+        const string incidentSql = """
+            INSERT INTO incidents (
+                id, school_id, line_id, source, problem_type, status, title,
+                description, started_at_utc, detected_at_utc, assigned_to)
+            VALUES ($1, $2, $3, 'Manual', $4, 'New', $5, $6, $7, $8, $9);
+            """;
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await AcquireLineLockAsync(connection, transaction, request.LineId, cancellationToken);
+
+        await using (var bindingCommand = connection.CreateCommand())
+        {
+            bindingCommand.Transaction = transaction;
+            bindingCommand.CommandText = bindingSql;
+            bindingCommand.Parameters.AddWithValue(request.LineId);
+            bindingCommand.Parameters.AddWithValue(request.SchoolId);
+            var bindingExists = Convert.ToBoolean(
+                await bindingCommand.ExecuteScalarAsync(cancellationToken),
+                CultureInfo.InvariantCulture);
+            if (!bindingExists)
+            {
+                return new ManualIncidentCreationResult(
+                    ManualIncidentCreationOutcome.BindingNotFound,
+                    IncidentId: null);
+            }
+        }
+
+        if (await GetOpenIncidentAsync(connection, transaction, request.LineId, cancellationToken) is not null)
+        {
+            return new ManualIncidentCreationResult(
+                ManualIncidentCreationOutcome.OpenIncidentExists,
+                IncidentId: null);
+        }
+
+        var occurredAtUtc = timeProvider.GetUtcNow();
+        var startedAtUtc = request.StartedAtUtc ?? occurredAtUtc;
+        var incidentId = Guid.NewGuid();
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = incidentSql;
+            command.Parameters.AddWithValue(incidentId);
+            command.Parameters.AddWithValue(request.SchoolId);
+            command.Parameters.AddWithValue(request.LineId);
+            command.Parameters.AddWithValue(request.ProblemType.Trim());
+            command.Parameters.AddWithValue(request.Title.Trim());
+            command.Parameters.AddWithValue(request.Description.Trim());
+            command.Parameters.AddWithValue(startedAtUtc);
+            command.Parameters.AddWithValue(occurredAtUtc);
+            AddNullableParameter(command, NpgsqlDbType.Text, NormalizeOptional(request.AssignedTo));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await AddHistoryAsync(
+            connection,
+            transaction,
+            incidentId,
+            occurredAtUtc,
+            "CreatedManually",
+            previousStatus: null,
+            IncidentStatus.New,
+            NormalizeOptional(request.Comment) ?? "Инцидент создан вручную.",
+            request.Actor.Trim(),
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new ManualIncidentCreationResult(
+            ManualIncidentCreationOutcome.Created,
+            incidentId);
+    }
+
+    public async Task<IncidentStatusChangeOutcome> ChangeStatusAsync(
+        Guid incidentId,
+        IncidentStatusChangeRequest request,
+        CancellationToken cancellationToken)
+    {
+        const string updateSql = """
+            UPDATE incidents
+            SET status = $2,
+                sent_to_provider_at_utc = CASE
+                    WHEN $2 = 'SentToProvider' THEN coalesce(sent_to_provider_at_utc, $3)
+                    ELSE sent_to_provider_at_utc
+                END,
+                recovered_at_utc = CASE
+                    WHEN $2 = 'Resolved' THEN coalesce(recovered_at_utc, $3)
+                    WHEN $2 = 'InProgress' AND status = 'Resolved' THEN NULL
+                    ELSE recovered_at_utc
+                END,
+                closed_at_utc = CASE
+                    WHEN $2 = 'Closed' THEN $3
+                    WHEN $2 = 'InProgress' AND status = 'Resolved' THEN NULL
+                    ELSE closed_at_utc
+                END,
+                updated_at_utc = $3
+            WHERE id = $1;
+            """;
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var state = await GetIncidentStateForUpdateAsync(
+            connection,
+            transaction,
+            incidentId,
+            cancellationToken);
+        if (state is null)
+        {
+            return IncidentStatusChangeOutcome.NotFound;
+        }
+
+        if (!IncidentStatusTransitionPolicy.CanTransition(state.Status, request.Status))
+        {
+            return IncidentStatusChangeOutcome.InvalidTransition;
+        }
+
+        if (state.Status == request.Status)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return IncidentStatusChangeOutcome.Updated;
+        }
+
+        var occurredAtUtc = timeProvider.GetUtcNow();
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = updateSql;
+            command.Parameters.AddWithValue(incidentId);
+            command.Parameters.AddWithValue(request.Status.ToString());
+            command.Parameters.AddWithValue(occurredAtUtc);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            return IncidentStatusChangeOutcome.InvalidTransition;
+        }
+
+        await AddHistoryAsync(
+            connection,
+            transaction,
+            incidentId,
+            occurredAtUtc,
+            "StatusChanged",
+            state.Status,
+            request.Status,
+            NormalizeOptional(request.Comment),
+            request.Actor.Trim(),
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return IncidentStatusChangeOutcome.Updated;
+    }
+
+    public async Task<bool> AssignAsync(
+        Guid incidentId,
+        IncidentAssignmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        const string updateSql = """
+            UPDATE incidents
+            SET assigned_to = $2, updated_at_utc = $3
+            WHERE id = $1;
+            """;
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var state = await GetIncidentStateForUpdateAsync(
+            connection,
+            transaction,
+            incidentId,
+            cancellationToken);
+        if (state is null)
+        {
+            return false;
+        }
+
+        var assignedTo = NormalizeOptional(request.AssignedTo);
+        var occurredAtUtc = timeProvider.GetUtcNow();
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = updateSql;
+            command.Parameters.AddWithValue(incidentId);
+            AddNullableParameter(command, NpgsqlDbType.Text, assignedTo);
+            command.Parameters.AddWithValue(occurredAtUtc);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var assignmentDescription = $"Ответственный: {FormatAssignment(state.AssignedTo)} → {FormatAssignment(assignedTo)}.";
+        var comment = NormalizeOptional(request.Comment);
+        await AddHistoryAsync(
+            connection,
+            transaction,
+            incidentId,
+            occurredAtUtc,
+            "AssignmentChanged",
+            previousStatus: null,
+            newStatus: null,
+            comment is null ? assignmentDescription : $"{assignmentDescription} {comment}",
+            request.Actor.Trim(),
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> AddCommentAsync(
+        Guid incidentId,
+        IncidentCommentCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO incident_history (
+                incident_id, occurred_at_utc, action, comment, actor)
+            SELECT $1, $2, 'CommentAdded', $3, $4
+            WHERE EXISTS (SELECT 1 FROM incidents WHERE id = $1);
+            """;
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue(incidentId);
+        command.Parameters.AddWithValue(timeProvider.GetUtcNow());
+        command.Parameters.AddWithValue(request.Comment.Trim());
+        command.Parameters.AddWithValue(request.Actor.Trim());
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     private static async Task AcquireLineLockAsync(
@@ -246,6 +483,30 @@ public sealed class PostgresIncidentRepository(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken)
             ? new OpenIncident(reader.GetGuid(0), Enum.Parse<IncidentStatus>(reader.GetString(1)))
+            : null;
+    }
+
+    private static async Task<IncidentState?> GetIncidentStateForUpdateAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid incidentId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT status, assigned_to
+            FROM incidents
+            WHERE id = $1
+            FOR UPDATE;
+            """;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        command.Parameters.AddWithValue(incidentId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? new IncidentState(
+                Enum.Parse<IncidentStatus>(reader.GetString(0)),
+                reader.IsDBNull(1) ? null : reader.GetString(1))
             : null;
     }
 
@@ -473,9 +734,11 @@ public sealed class PostgresIncidentRepository(
         new DateTimeOffset(reader.GetDateTime(12)),
         new DateTimeOffset(reader.GetDateTime(13)),
         reader.IsDBNull(14) ? null : new DateTimeOffset(reader.GetDateTime(14)),
-        reader.GetInt64(15),
-        reader.IsDBNull(16) ? null : reader.GetGuid(16),
-        reader.IsDBNull(17) ? null : reader.GetString(17));
+        reader.IsDBNull(15) ? null : new DateTimeOffset(reader.GetDateTime(15)),
+        reader.IsDBNull(16) ? null : new DateTimeOffset(reader.GetDateTime(16)),
+        reader.GetInt64(17),
+        reader.IsDBNull(18) ? null : reader.GetGuid(18),
+        reader.IsDBNull(19) ? null : reader.GetString(19));
 
     private static void AddNullableParameter(
         NpgsqlCommand command,
@@ -492,7 +755,15 @@ public sealed class PostgresIncidentRepository(
     private static double? GetNullableDouble(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : Convert.ToDouble(reader.GetDecimal(ordinal));
 
+    private static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatAssignment(string? value) =>
+        value is null ? "не назначен" : $"«{value}»";
+
     private sealed record OpenIncident(Guid IncidentId, IncidentStatus Status);
+
+    private sealed record IncidentState(IncidentStatus Status, string? AssignedTo);
 
     private sealed record IncidentSignalData(
         Guid EventId,

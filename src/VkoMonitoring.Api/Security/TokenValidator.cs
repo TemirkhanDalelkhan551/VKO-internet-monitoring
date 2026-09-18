@@ -4,7 +4,7 @@ using VkoMonitoring.Api.Configuration;
 
 namespace VkoMonitoring.Api.Security;
 
-public sealed class TokenValidator(MonitoringApiOptions options)
+public sealed class TokenValidator(MonitoringApiOptions options, IHttpContextAccessor? accessor = null)
 {
     public bool IsDeviceAuthorized(
         Guid schoolId,
@@ -21,6 +21,10 @@ public sealed class TokenValidator(MonitoringApiOptions options)
     }
 
     public bool IsAdminAuthorized(string? suppliedToken) =>
+        accessor?.HttpContext is { } context && MonitoringRequestAccess.From(context) is not null ||
+        options.EnableLegacyAdminToken && IsLegacyAdminAuthorized(suppliedToken);
+
+    public bool IsLegacyAdminAuthorized(string? suppliedToken) =>
         EqualsInConstantTime(options.AdminToken, suppliedToken);
 
     private static bool EqualsInConstantTime(string expected, string? supplied)

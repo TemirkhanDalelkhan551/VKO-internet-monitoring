@@ -2,12 +2,14 @@ using Npgsql;
 using NpgsqlTypes;
 using VkoMonitoring.Agent.Core.Domain;
 using VkoMonitoring.Api.Configuration;
+using VkoMonitoring.Api.Security;
 
 namespace VkoMonitoring.Api.Persistence;
 
 public sealed class PostgresMeasurementRepository(
     NpgsqlDataSource dataSource,
-    MonitoringApiOptions options) : IMeasurementRepository
+    MonitoringApiOptions options,
+    MonitoringAccessContext access) : IMeasurementRepository
 {
     public async Task<bool> AddIfNotExistsAsync(
         InternetMeasurement measurement,
@@ -72,11 +74,12 @@ public sealed class PostgresMeasurementRepository(
                    failure_kind, duration_milliseconds, external_ip_address,
                    network_connection_type, measurement_server
             FROM measurements
+            WHERE /* access */
             ORDER BY measured_at_utc DESC
             LIMIT $1;
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("line_id")));
         command.Parameters.AddWithValue(limit);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var measurements = new List<InternetMeasurement>(limit);

@@ -21,6 +21,29 @@ public sealed class UnsupportedIncidentRepository : IIncidentRepository
         CancellationToken cancellationToken) =>
         throw CreateException();
 
+    public Task<ManualIncidentCreationResult> CreateManualIncidentAsync(
+        ManualIncidentCreateRequest request,
+        CancellationToken cancellationToken) =>
+        throw CreateException();
+
+    public Task<IncidentStatusChangeOutcome> ChangeStatusAsync(
+        Guid incidentId,
+        IncidentStatusChangeRequest request,
+        CancellationToken cancellationToken) =>
+        throw CreateException();
+
+    public Task<bool> AssignAsync(
+        Guid incidentId,
+        IncidentAssignmentRequest request,
+        CancellationToken cancellationToken) =>
+        throw CreateException();
+
+    public Task<bool> AddCommentAsync(
+        Guid incidentId,
+        IncidentCommentCreateRequest request,
+        CancellationToken cancellationToken) =>
+        throw CreateException();
+
     private static NotSupportedException CreateException() =>
         new("Incidents require PostgreSQL storage.");
 }

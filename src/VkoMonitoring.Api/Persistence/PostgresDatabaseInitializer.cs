@@ -22,6 +22,13 @@ public sealed class PostgresDatabaseInitializer(
         await using var schemaCommand = dataSource.CreateCommand(schemaSql);
         await schemaCommand.ExecuteNonQueryAsync(cancellationToken);
 
+        await using var usersStream = typeof(PostgresDatabaseInitializer).Assembly
+            .GetManifestResourceStream("VkoMonitoring.Api.Persistence.Sql.002_users_and_audit.sql")
+            ?? throw new InvalidOperationException("User schema resource was not found.");
+        using var usersReader = new StreamReader(usersStream);
+        await using var usersCommand = dataSource.CreateCommand(await usersReader.ReadToEndAsync(cancellationToken));
+        await usersCommand.ExecuteNonQueryAsync(cancellationToken);
+
         foreach (var (deviceIdentifier, binding) in options.DeviceBindings)
         {
             if (!Guid.TryParse(deviceIdentifier, out var deviceId))

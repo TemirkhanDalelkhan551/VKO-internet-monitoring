@@ -4,8 +4,13 @@ namespace VkoMonitoring.Api.Validation;
 
 public static class MeasurementValidator
 {
-    public static IReadOnlyDictionary<string, string[]> Validate(InternetMeasurement measurement)
+    public static IReadOnlyDictionary<string, string[]> Validate(
+        InternetMeasurement measurement,
+        DateTimeOffset nowUtc,
+        TimeSpan maximumClockSkew)
     {
+        ArgumentNullException.ThrowIfNull(measurement);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumClockSkew, TimeSpan.Zero);
         var errors = new Dictionary<string, string[]>();
 
         AddRequiredGuid(measurement.EventId, nameof(measurement.EventId), errors);
@@ -17,13 +22,28 @@ public static class MeasurementValidator
         {
             errors[nameof(measurement.MeasuredAtUtc)] = ["Measurement timestamp is required."];
         }
+        else if (measurement.MeasuredAtUtc > nowUtc + maximumClockSkew)
+        {
+            errors[nameof(measurement.MeasuredAtUtc)] = ["Measurement timestamp exceeds the allowed clock skew."];
+        }
+
+        if (measurement.ConnectionStatus == ConnectionStatus.Online)
+        {
+            RequireOnlineMetric(measurement.DownloadMbps, nameof(measurement.DownloadMbps), errors);
+            RequireOnlineMetric(measurement.UploadMbps, nameof(measurement.UploadMbps), errors);
+            RequireOnlineMetric(measurement.PingMilliseconds, nameof(measurement.PingMilliseconds), errors);
+            RequireOnlineMetric(measurement.JitterMilliseconds, nameof(measurement.JitterMilliseconds), errors);
+            RequireOnlineMetric(measurement.PacketLossPercent, nameof(measurement.PacketLossPercent), errors);
+        }
 
         ValidateNonNegative(measurement.DownloadMbps, nameof(measurement.DownloadMbps), errors);
         ValidateNonNegative(measurement.UploadMbps, nameof(measurement.UploadMbps), errors);
         ValidateNonNegative(measurement.PingMilliseconds, nameof(measurement.PingMilliseconds), errors);
         ValidateNonNegative(measurement.JitterMilliseconds, nameof(measurement.JitterMilliseconds), errors);
 
-        if (measurement.PacketLossPercent is < 0 or > 100)
+        if (measurement.PacketLossPercent is < 0 or > 100 ||
+            double.IsNaN(measurement.PacketLossPercent ?? 0) ||
+            double.IsInfinity(measurement.PacketLossPercent ?? 0))
         {
             errors[nameof(measurement.PacketLossPercent)] = ["Packet loss must be between 0 and 100 percent."];
         }
@@ -39,6 +59,17 @@ public static class MeasurementValidator
         }
 
         return errors;
+    }
+
+    private static void RequireOnlineMetric(
+        double? value,
+        string propertyName,
+        IDictionary<string, string[]> errors)
+    {
+        if (value is null)
+        {
+            errors[propertyName] = ["Metric is required for an Online measurement."];
+        }
     }
 
     private static void AddRequiredGuid(

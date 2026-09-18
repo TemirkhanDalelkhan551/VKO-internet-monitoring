@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: vko-internet-monitoring-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./src/VkoMonitoring.Api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/ready
+    autoDeployTrigger: off
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: MonitoringApi__StorageProvider
+        value: PostgreSql
+      - key: MonitoringApi__AdminToken
+        generateValue: true
+      - key: MonitoringApi__EnableLegacyAdminToken
+        value: "false"
+      - key: MonitoringApi__MaximumSpeedTestBytes
+        value: "5000000"
+      - key: ConnectionStrings__MonitoringDatabase
+        fromDatabase:
+          name: vko-internet-monitoring-db
+          property: connectionString
+
+databases:
+  - name: vko-internet-monitoring-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "17"
+    databaseName: vko_monitoring
+    user: vko_monitoring
+    ipAllowList: []

@@ -1,5 +1,7 @@
 namespace VkoMonitoring.Api.Configuration;
 
+using VkoMonitoring.Api.Security;
+
 public static class MonitoringApiOptionsValidator
 {
     public static void Validate(MonitoringApiOptions options, string? postgresConnectionString)
@@ -7,9 +9,11 @@ public static class MonitoringApiOptionsValidator
         ArgumentNullException.ThrowIfNull(options);
 
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(options.AdminToken))
+        if (options.UserSessionLifetimeMinutes is < 5 or > 1440)
+            errors.Add("UserSessionLifetimeMinutes must be between 5 and 1440.");
+        if (!ConfigurationSecret.IsConfigured(options.AdminToken))
         {
-            errors.Add("AdminToken must be configured.");
+            errors.Add("AdminToken must be configured with a non-placeholder secret.");
         }
 
         if (options.DeviceTokens.Count == 0 &&
@@ -52,9 +56,27 @@ public static class MonitoringApiOptionsValidator
             errors.Add("All quality thresholds must be greater than zero.");
         }
 
+        if (options.MaximumMeasurementClockSkewMinutes is < 0 or > 60)
+        {
+            errors.Add("MaximumMeasurementClockSkewMinutes must be between 0 and 60.");
+        }
+
         if (options.DeviceActiveWindowMinutes <= 0)
         {
             errors.Add("DeviceActiveWindowMinutes must be greater than zero.");
+        }
+
+        if (options.MeasurementFreshnessMinutes <= 0)
+        {
+            errors.Add("MeasurementFreshnessMinutes must be greater than zero.");
+        }
+
+        foreach (var binding in options.DeviceBindings.Values)
+        {
+            if (binding.LineStatus is not ("Primary" or "Backup" or "Disabled"))
+            {
+                errors.Add("Device binding LineStatus must be Primary, Backup, or Disabled.");
+            }
         }
 
         if (options.Incidents.ConsecutiveProblemMeasurements is < 2 or > 20)
@@ -80,6 +102,11 @@ public static class MonitoringApiOptionsValidator
         if (options.ReadinessDegradedAfterMilliseconds <= 0)
         {
             errors.Add("ReadinessDegradedAfterMilliseconds must be greater than zero.");
+        }
+
+        if (options.MaximumSpeedTestBytes is < 1_024 or > 100_000_000)
+        {
+            errors.Add("MaximumSpeedTestBytes must be between 1024 and 100000000 bytes.");
         }
 
         if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
