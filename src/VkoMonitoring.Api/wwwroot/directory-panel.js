@@ -58,7 +58,13 @@ export function createDirectoryPanel({ element, request, getSession, onUnauthori
   const hide = element("button", "text-button", "Скрыть код"); hide.type = "button";
   output.append(binding, code, expiry, copy, hide);
   activationForm.append(issue, activationFeedback, output);
-  details.append(note, grid, feedback, activationForm); host.append(details);
+  const registry = element("section", "activation-registry");
+  registry.append(element("h3", "", "Реестр кодов активации"));
+  const refreshCodes = element("button", "button secondary", "Обновить реестр"); refreshCodes.type = "button";
+  const registryFeedback = element("p", "section-note"); registryFeedback.setAttribute("role", "status");
+  const registryTable = element("div", "table-wrap");
+  registry.append(refreshCodes, registryFeedback, registryTable);
+  details.append(note, grid, feedback, activationForm, registry); host.append(details);
   let issuance = 0, expirationTimer = null;
   function clearCode() { issuance++; clearTimeout(expirationTimer); expirationTimer = null; code.value = ""; output.hidden = true; binding.textContent = ""; expiry.textContent = ""; activationFeedback.textContent = ""; }
   hide.addEventListener("click", clearCode);
@@ -82,6 +88,7 @@ export function createDirectoryPanel({ element, request, getSession, onUnauthori
       code.value = result.activationCode; binding.textContent = `${school.name} · ${line.name}`;
       expiry.textContent = `Действует до ${new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(result.expiresAtUtc))}. Код показывается только здесь; скрытие не отзывает его. Новый код не отменяет ранее выданные.`;
       output.hidden = false; activationFeedback.textContent = "Код выдан. Один код — один компьютер.";
+      await loadCodes();
       expirationTimer = setTimeout(() => { if (valid()) { clearCode(); activationFeedback.textContent = "Срок действия кода истёк. Выдайте новый."; } }, Math.max(0, Date.parse(result.expiresAtUtc) - Date.now()));
     } catch (error) {
       if (!valid()) return;
@@ -89,6 +96,36 @@ export function createDirectoryPanel({ element, request, getSession, onUnauthori
       activationFeedback.textContent = error.status === 429 ? "Слишком много запросов. Повторите через минуту." : error.status === 404 ? "Школа или линия больше недоступна. Обновите список." : error.detail || "Не удалось выдать код. Проверьте соединение и права доступа.";
     } finally { if (session.epoch === getSession().epoch) setBusy(false); }
   });
+  const statusLabels = { Active: "Действует", Used: "Использован", Expired: "Истёк", Revoked: "Отозван" };
+  async function loadCodes() {
+    const session = getSession(); registryFeedback.textContent = "Загружаем…";
+    try {
+      const rows = await request("/api/activation-codes?limit=100", { token: session.token });
+      if (session.epoch !== getSession().epoch) return;
+      const table = element("table", "data-table");
+      const head = element("tr"); for (const label of ["Школа и линия", "Выдан", "Действует до", "Статус", "Действие"]) head.append(element("th", "", label));
+      const body = element("tbody");
+      for (const row of rows) {
+        const tr = element("tr");
+        tr.append(element("td", "", `${row.schoolName} · ${row.lineName}`), element("td", "", formatDate(row.createdAtUtc)),
+          element("td", "", formatDate(row.expiresAtUtc)), element("td", `status-${row.status.toLowerCase()}`, statusLabels[row.status] || row.status));
+        const action = element("td");
+        if (row.status === "Active") {
+          const revoke = element("button", "text-button", "Отозвать"); revoke.type = "button";
+          revoke.addEventListener("click", async () => {
+            revoke.disabled = true; registryFeedback.textContent = "Отзываем код…";
+            try { await request(`/api/activation-codes/${row.activationCodeId}/revoke`, { method: "POST", token: getSession().token }); await loadCodes(); }
+            catch (error) { if (error.status === 401) onUnauthorized(); else registryFeedback.textContent = error.detail || "Не удалось отозвать код."; }
+          });
+          action.append(revoke);
+        } else action.textContent = "—";
+        tr.append(action); body.append(tr);
+      }
+      table.append(head, body); registryTable.replaceChildren(table); registryFeedback.textContent = rows.length ? `Показано: ${rows.length}. Сами коды после выдачи не хранятся в открытом виде.` : "Коды ещё не выдавались.";
+    } catch (error) { if (error.status === 401) onUnauthorized(); else registryFeedback.textContent = error.detail || "Не удалось загрузить реестр."; }
+  }
+  function formatDate(value) { return value ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—"; }
+  refreshCodes.addEventListener("click", loadCodes);
   function currentSchool() { return schools.find(school => school.schoolId === selectedSchoolId); }
   function fill(target, data) { for (const [key, input] of Object.entries(target)) input.value = data?.[key] ?? (key === "lineStatus" ? "Primary" : ""); }
   function setBusy(value) {
@@ -145,12 +182,14 @@ export function createDirectoryPanel({ element, request, getSession, onUnauthori
     schoolSelect.replaceChildren(new Option("Новая школа", ""), ...schools.map(school => new Option(school.name, school.schoolId)));
     if (selectedSchoolId && !currentSchool()) { clearCode(); selectedSchoolId = ""; selectedLineId = ""; fill(schoolFields, null); fill(lineFields, null); }
     schoolSelect.value = selectedSchoolId; updateLines();
+    if (!host.hidden) loadCodes();
   }
   function clear() {
     clearCode(); lifetime.value = "30";
     generation++; schools = []; selectedSchoolId = ""; selectedLineId = ""; busy = false;
     host.hidden = true; details.open = false; schoolSelect.replaceChildren(); lineSelect.replaceChildren();
     fill(schoolFields, null); fill(lineFields, null); feedback.textContent = ""; setBusy(false);
+    registryTable.replaceChildren(); registryFeedback.textContent = "";
   }
   return { render, clear };
 }

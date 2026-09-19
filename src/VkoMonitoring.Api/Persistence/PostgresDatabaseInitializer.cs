@@ -29,6 +29,11 @@ public sealed class PostgresDatabaseInitializer(
         await using var usersCommand = dataSource.CreateCommand(await usersReader.ReadToEndAsync(cancellationToken));
         await usersCommand.ExecuteNonQueryAsync(cancellationToken);
 
+        await ExecuteEmbeddedScriptAsync(
+            "VkoMonitoring.Api.Persistence.Sql.003_web_operations.sql",
+            "Web operations schema resource was not found.",
+            cancellationToken);
+
         foreach (var (deviceIdentifier, binding) in options.DeviceBindings)
         {
             if (!Guid.TryParse(deviceIdentifier, out var deviceId))
@@ -39,6 +44,15 @@ public sealed class PostgresDatabaseInitializer(
             options.DeviceTokens.TryGetValue(deviceIdentifier, out var deviceToken);
             await SeedDeviceAsync(deviceId, binding, deviceToken, cancellationToken);
         }
+    }
+
+    private async Task ExecuteEmbeddedScriptAsync(string resourceName, string error, CancellationToken cancellationToken)
+    {
+        await using var stream = typeof(PostgresDatabaseInitializer).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(error);
+        using var reader = new StreamReader(stream);
+        await using var command = dataSource.CreateCommand(await reader.ReadToEndAsync(cancellationToken));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task SeedDeviceAsync(

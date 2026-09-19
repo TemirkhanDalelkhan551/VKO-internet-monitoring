@@ -8,7 +8,7 @@ namespace VkoMonitoring.Agent.Core.Services;
 public sealed class DailyMeasurementSchedule : IMeasurementSchedule
 {
     private readonly Guid _deviceId;
-    private readonly IReadOnlyList<DailyWindow> _windows;
+    private IReadOnlyList<DailyWindow> _windows;
 
     public DailyMeasurementSchedule(AgentOptions options)
     {
@@ -16,14 +16,27 @@ public sealed class DailyMeasurementSchedule : IMeasurementSchedule
         _windows = options.MeasurementWindows.Select(DailyWindow.Parse).ToArray();
     }
 
+    public bool TryUpdateWindows(IEnumerable<string> windows)
+    {
+        try
+        {
+            var parsed = windows.Select(DailyWindow.Parse).ToArray();
+            if (parsed.Length == 0) return false;
+            Volatile.Write(ref _windows, parsed);
+            return true;
+        }
+        catch (FormatException) { return false; }
+    }
+
     public DateTimeOffset GetNextRun(DateTimeOffset now)
     {
         for (var dayOffset = 0; dayOffset <= 1; dayOffset++)
         {
             var date = DateOnly.FromDateTime(now.Date.AddDays(dayOffset));
-            for (var index = 0; index < _windows.Count; index++)
+            var windows = Volatile.Read(ref _windows);
+            for (var index = 0; index < windows.Count; index++)
             {
-                var candidate = CreateRunTime(date, _windows[index], index, now.Offset);
+                var candidate = CreateRunTime(date, windows[index], index, now.Offset);
                 if (candidate > now)
                 {
                     return candidate;

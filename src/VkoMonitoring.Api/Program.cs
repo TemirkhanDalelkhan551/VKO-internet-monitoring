@@ -144,6 +144,7 @@ if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreC
     builder.Services.AddSingleton<IDeviceRegistrationRepository, PostgresDeviceRegistrationRepository>();
     builder.Services.AddSingleton<IDeviceAdministrationRepository, PostgresDeviceAdministrationRepository>();
     builder.Services.AddSingleton<IDeviceActivationRepository, PostgresDeviceActivationRepository>();
+    builder.Services.AddSingleton<IOperationalSettingsRepository, PostgresOperationalSettingsRepository>();
     builder.Services.AddSingleton<IIncidentRepository, PostgresIncidentRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, PostgresReadinessProbe>();
 }
@@ -156,6 +157,7 @@ else
     builder.Services.AddSingleton<IDeviceRegistrationRepository, UnsupportedDeviceRegistrationRepository>();
     builder.Services.AddSingleton<IDeviceAdministrationRepository, UnsupportedDeviceAdministrationRepository>();
     builder.Services.AddSingleton<IDeviceActivationRepository, UnsupportedDeviceActivationRepository>();
+    builder.Services.AddSingleton<IOperationalSettingsRepository, ConfiguredOperationalSettingsRepository>();
     builder.Services.AddSingleton<IIncidentRepository, UnsupportedIncidentRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, LocalStorageReadinessProbe>();
 }
@@ -251,6 +253,49 @@ app.MapPost(
             : Results.NotFound();
     })
     .RequireRateLimiting("agent-write");
+
+app.MapGet(
+    "/api/devices/configuration",
+    async (Guid schoolId, Guid deviceId, Guid lineId, HttpRequest request, IDeviceAuthenticator authenticator,
+        IOperationalSettingsRepository settingsRepository, CancellationToken cancellationToken) =>
+    {
+        if (!await authenticator.IsAuthorizedAsync(schoolId, deviceId, lineId,
+            request.Headers["X-Device-Token"].FirstOrDefault(), cancellationToken)) return Results.Unauthorized();
+        var settings = await settingsRepository.GetAsync(cancellationToken);
+        return Results.Ok(new VkoMonitoring.Agent.Core.Domain.AgentRuntimeConfiguration(settings.MeasurementWindows));
+    })
+    .RequireRateLimiting("agent-write");
+
+app.MapGet("/api/settings/operations", async (HttpRequest request, IOperationalSettingsRepository repository, CancellationToken cancellationToken) =>
+    MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator }
+        ? Results.Forbid()
+        : Results.Ok(await repository.GetAsync(cancellationToken)))
+    .RequireRateLimiting("admin-read");
+
+app.MapPut("/api/settings/operations", async (
+    VkoMonitoring.Api.Models.OperationalSettings settings,
+    HttpRequest request,
+    IOperationalSettingsRepository repository,
+    CancellationToken cancellationToken) =>
+{
+    if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator }) return Results.Forbid();
+    try
+    {
+        if (settings.MeasurementWindows is null || settings.MeasurementWindows.Length is < 1 or > 12 ||
+            settings.MeasurementWindows.Any(window => string.IsNullOrWhiteSpace(window)) ||
+            settings.MeasurementWindows.Select(VkoMonitoring.Agent.Core.Configuration.DailyWindow.Parse).Count() == 0 ||
+            settings.MinimumDownloadMbps <= 0 || settings.MinimumUploadMbps <= 0 ||
+            settings.MaximumPingMilliseconds <= 0 || settings.MaximumJitterMilliseconds <= 0 ||
+            settings.MaximumPacketLossPercent is <= 0 or > 100 || settings.MinimumAvailabilityPercent is <= 0 or > 100)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["settings"] = ["Specify valid measurement windows and positive quality thresholds."] });
+        return Results.Ok(await repository.UpdateAsync(settings, cancellationToken));
+    }
+    catch (FormatException)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["measurementWindows"] = ["Use HH:mm-HH:mm and a non-empty interval."] });
+    }
+})
+    .RequireRateLimiting("admin-write");
 
 app.MapGet(
     "/api/devices/{deviceId:guid}/status",
@@ -498,6 +543,37 @@ app.MapPost(
         return Results.Created(
             "/api/activation-codes",
             new VkoMonitoring.Api.Models.ActivationCodeCreateResult(activationCode, expiresAtUtc));
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapGet(
+    "/api/activation-codes",
+    async (int? limit, HttpRequest request, IDeviceActivationRepository repository, CancellationToken cancellationToken) =>
+    {
+        var user = MonitoringRequestAccess.From(request.HttpContext)?.User;
+        if (user is not null && user.Role is not (UserRole.Administrator or UserRole.Regional))
+        {
+            return Results.Forbid();
+        }
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem("Device activation requires PostgreSQL storage.", statusCode: StatusCodes.Status501NotImplemented);
+        }
+        return Results.Ok(await repository.ListCodesAsync(Math.Clamp(limit ?? 100, 1, 500), cancellationToken));
+    })
+    .RequireRateLimiting("admin-read");
+
+app.MapPost(
+    "/api/activation-codes/{activationCodeId:guid}/revoke",
+    async (Guid activationCodeId, IDeviceActivationRepository repository, CancellationToken cancellationToken) =>
+    {
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem("Device activation requires PostgreSQL storage.", statusCode: StatusCodes.Status501NotImplemented);
+        }
+        return await repository.RevokeCodeAsync(activationCodeId, cancellationToken)
+            ? Results.NoContent()
+            : Results.Conflict(new { error = "Code is missing, expired, used, or already revoked." });
     })
     .RequireRateLimiting("admin-write");
 

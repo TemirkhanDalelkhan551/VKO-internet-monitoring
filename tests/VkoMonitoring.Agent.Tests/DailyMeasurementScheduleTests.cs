@@ -42,6 +42,28 @@ public sealed class DailyMeasurementScheduleTests
         Assert.InRange(result.TimeOfDay, TimeSpan.FromHours(8), TimeSpan.FromHours(9));
     }
 
+    [Fact]
+    public void TryUpdateWindows_AppliesValidRemoteSchedule()
+    {
+        var schedule = new DailyMeasurementSchedule(CreateOptions());
+        Assert.True(schedule.TryUpdateWindows(["10:00-11:00"]));
+
+        var result = schedule.GetNextRun(new DateTimeOffset(2026, 9, 15, 7, 30, 0, TimeSpan.FromHours(5)));
+
+        Assert.InRange(result.TimeOfDay, TimeSpan.FromHours(10), TimeSpan.FromHours(11));
+    }
+
+    [Fact]
+    public void TryUpdateWindows_PreservesScheduleWhenRemoteValueIsInvalid()
+    {
+        var schedule = new DailyMeasurementSchedule(CreateOptions());
+        Assert.False(schedule.TryUpdateWindows(["invalid"]));
+
+        var result = schedule.GetNextRun(new DateTimeOffset(2026, 9, 15, 7, 30, 0, TimeSpan.FromHours(5)));
+
+        Assert.InRange(result.TimeOfDay, TimeSpan.FromHours(8), TimeSpan.FromHours(9));
+    }
+
     private static AgentOptions CreateOptions() => new()
     {
         DeviceId = Guid.Parse("22222222-2222-2222-2222-222222222222"),

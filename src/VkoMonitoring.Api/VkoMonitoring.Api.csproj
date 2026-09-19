@@ -12,5 +12,6 @@
     <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Persistence\Sql\001_initial_schema.sql" />
     <EmbeddedResource Include="Persistence\Sql\002_users_and_audit.sql" />
+    <EmbeddedResource Include="Persistence\Sql\003_web_operations.sql" />
   </ItemGroup>
 </Project>

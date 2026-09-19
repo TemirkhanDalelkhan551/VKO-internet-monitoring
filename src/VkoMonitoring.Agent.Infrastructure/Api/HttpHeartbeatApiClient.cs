@@ -9,7 +9,7 @@ public sealed class HttpHeartbeatApiClient(
     HttpClient httpClient,
     IDeviceTokenProvider tokenProvider) : IHeartbeatApiClient
 {
-    public async Task SendAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken)
+    public async Task<AgentRuntimeConfiguration?> SendAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/devices/heartbeat")
         {
@@ -19,5 +19,11 @@ public sealed class HttpHeartbeatApiClient(
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
+        using var configurationRequest = new HttpRequestMessage(HttpMethod.Get,
+            $"api/devices/configuration?schoolId={heartbeat.SchoolId:D}&deviceId={heartbeat.DeviceId:D}&lineId={heartbeat.LineId:D}");
+        configurationRequest.Headers.Add("X-Device-Token", tokenProvider.GetToken());
+        using var configurationResponse = await httpClient.SendAsync(configurationRequest, cancellationToken);
+        configurationResponse.EnsureSuccessStatusCode();
+        return await configurationResponse.Content.ReadFromJsonAsync<AgentRuntimeConfiguration>(cancellationToken: cancellationToken);
     }
 }

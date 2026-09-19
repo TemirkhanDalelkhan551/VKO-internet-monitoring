@@ -12,6 +12,7 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Перейти к основному содержимому</a>
   <section id="login-view" class="login-view" aria-label="Вход в систему">
     <div class="login-story">
       <div class="brand"><img src="/mark.svg" alt="" width="40" height="40"><span>ВКО<span class="brand-sub">Мониторинг интернета</span></span></div>
@@ -36,9 +37,11 @@
       <div class="brand"><img src="/mark.svg" alt="" width="36" height="36"><span>ВКО<span class="brand-sub">Мониторинг интернета</span></span></div>
       <p class="nav-label">Рабочее пространство</p><a class="nav-item selected" href="/" aria-current="page"><span aria-hidden="true">▦</span> Школы и линии</a>
       <button id="open-incidents" class="nav-item" type="button">Инциденты</button>
+      <button id="open-notifications" class="nav-item" type="button" hidden>Уведомления</button>
+      <button id="open-admin" class="nav-item" type="button" hidden>Администрирование</button>
       <div class="sidebar-bottom"><p class="nav-label">Область доступа</p><p id="access-description" class="access-description"></p><div class="account"><div id="user-avatar" class="avatar" aria-hidden="true"></div><div><strong id="user-name"></strong><span id="user-role"></span></div></div><button id="logout" class="logout" type="button">Выйти из системы <span aria-hidden="true">↗</span></button></div>
     </aside>
-    <main class="main">
+    <main id="main-content" class="main" tabindex="-1">
       <header id="overview-header" class="page-header"><div><p class="breadcrumb">Восточно-Казахстанская область <span>/</span> Обзор</p><h1>Школы и линии</h1><p class="page-subtitle">Текущее состояние интернета в вашей области доступа.</p></div><div class="refresh-area"><button id="refresh" class="button secondary" type="button"><span aria-hidden="true">↻</span> Обновить</button><span id="updated-at" class="updated-at" aria-live="polite"></span></div></header>
       <div id="dashboard-message" class="message" role="alert" hidden></div>
       <section id="summary" class="summary" aria-label="Сводные показатели"></section>
@@ -54,6 +57,8 @@
       <section id="directory-panel" class="detail-section" aria-label="Управление школами и линиями" hidden></section>
       <section id="school-map-panel" class="schools-panel" aria-label="Карта школ ВКО"></section>
       <section id="incidents-panel" class="detail-section" aria-label="Инциденты"></section>
+      <section id="notifications-panel" class="detail-section" aria-label="Уведомления" hidden></section>
+      <section id="admin-panel" class="detail-section" aria-label="Администрирование" hidden></section>
       <section id="school-detail" aria-label="Карточка школы" hidden></section>
       <footer class="page-footer">Автономный мониторинг интернета <span>ВКО · Организации образования</span></footer>
     </main>

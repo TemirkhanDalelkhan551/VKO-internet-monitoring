@@ -4,6 +4,19 @@ public sealed record ActivationCodeCreateRequest(Guid SchoolId, Guid LineId, int
 
 public sealed record ActivationCodeCreateResult(string ActivationCode, DateTimeOffset ExpiresAtUtc);
 
+public sealed record ActivationCodeOverview(
+    Guid ActivationCodeId,
+    Guid SchoolId,
+    string SchoolName,
+    Guid LineId,
+    string LineName,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    DateTimeOffset? UsedAtUtc,
+    Guid? UsedByDeviceId,
+    DateTimeOffset? RevokedAtUtc,
+    string Status);
+
 public sealed record ActivationCodePreviewRequest(string ActivationCode);
 
 public sealed record ActivationCodePreviewResult(

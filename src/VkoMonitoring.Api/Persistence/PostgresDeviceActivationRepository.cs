@@ -32,6 +32,54 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
+    public async Task<IReadOnlyList<ActivationCodeOverview>> ListCodesAsync(
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT c.id, c.school_id, s.name, c.line_id, l.name,
+                   c.created_at_utc, c.expires_at_utc, c.used_at_utc,
+                   c.used_by_device_id, c.revoked_at_utc,
+                   CASE
+                     WHEN c.revoked_at_utc IS NOT NULL THEN 'Revoked'
+                     WHEN c.used_at_utc IS NOT NULL THEN 'Used'
+                     WHEN c.expires_at_utc <= now() THEN 'Expired'
+                     ELSE 'Active'
+                   END
+            FROM device_activation_codes c
+            JOIN schools s ON s.id = c.school_id
+            JOIN internet_lines l ON l.id = c.line_id AND l.school_id = c.school_id
+            ORDER BY c.created_at_utc DESC
+            LIMIT $1;
+            """;
+        var result = new List<ActivationCodeOverview>();
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue(limit);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new ActivationCodeOverview(
+                reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetGuid(3), reader.GetString(4),
+                reader.GetFieldValue<DateTimeOffset>(5), reader.GetFieldValue<DateTimeOffset>(6),
+                reader.IsDBNull(7) ? null : reader.GetFieldValue<DateTimeOffset>(7),
+                reader.IsDBNull(8) ? null : reader.GetGuid(8),
+                reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9), reader.GetString(10)));
+        }
+        return result;
+    }
+
+    public async Task<bool> RevokeCodeAsync(Guid activationCodeId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            UPDATE device_activation_codes
+            SET revoked_at_utc = now()
+            WHERE id = $1 AND used_at_utc IS NULL AND revoked_at_utc IS NULL AND expires_at_utc > now();
+            """;
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue(activationCodeId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     public async Task<ActivationCodePreviewResult?> PreviewAsync(
         byte[] codeHash,
         CancellationToken cancellationToken)
@@ -44,6 +92,7 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             JOIN internet_lines l ON l.id = c.line_id AND l.school_id = c.school_id
             WHERE c.code_hash = $1
               AND c.used_at_utc IS NULL
+              AND c.revoked_at_utc IS NULL
               AND c.expires_at_utc > now();
             """;
 
@@ -117,6 +166,7 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             FROM device_activation_codes
             WHERE code_hash = $1
               AND used_at_utc IS NULL
+              AND revoked_at_utc IS NULL
               AND expires_at_utc > now()
             FOR UPDATE;
             """;

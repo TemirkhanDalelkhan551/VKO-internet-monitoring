@@ -6,3 +6,5 @@ public sealed record AgentHeartbeat(
     Guid LineId,
     DateTimeOffset SentAtUtc,
     string AgentVersion);
+
+public sealed record AgentRuntimeConfiguration(string[] MeasurementWindows);

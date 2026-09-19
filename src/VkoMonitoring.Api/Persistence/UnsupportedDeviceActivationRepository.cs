@@ -13,6 +13,14 @@ public sealed class UnsupportedDeviceActivationRepository : IDeviceActivationRep
         CancellationToken cancellationToken) =>
         throw new NotSupportedException("Device activation requires PostgreSQL storage.");
 
+    public Task<IReadOnlyList<ActivationCodeOverview>> ListCodesAsync(
+        int limit,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException("Device activation requires PostgreSQL storage.");
+
+    public Task<bool> RevokeCodeAsync(Guid activationCodeId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("Device activation requires PostgreSQL storage.");
+
     public Task<ActivationCodePreviewResult?> PreviewAsync(
         byte[] codeHash,
         CancellationToken cancellationToken) =>

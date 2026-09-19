@@ -1,9 +1,9 @@
-import { metric, timestamp } from "./dashboard-model.js";
+import { metric, timestamp, summarize } from "./dashboard-model.js";
 import { dateValue, periodRange, periodQuery } from "./history-model.js";
 
 export function createOverviewTools({ request, getSession, onUnauthorized, element }) {
   const host = document.getElementById("overview-tools");
-  let epoch = 0, schools = [], options = null, controls = null, stats = null, feedback = null;
+  let epoch = 0, schools = [], options = null, controls = null, stats = null, groupStats = null, feedback = null;
   let analyticsVersion = 0, deviceVersion = 0, exportVersion = 0;
   let analyticsController, devicesController, exportController, optionsController;
   let devicesLoading = false, exporting = false;
@@ -55,7 +55,21 @@ export function createOverviewTools({ request, getSession, onUnauthorized, eleme
     controls.download = button("Скачать отчёт", download); controls.download.disabled = true;
     feedback = element("div", "message"); feedback.hidden = true; feedback.setAttribute("role", "status");
     report.append(summary, reportNote, filters, controls.devices, controls.fields, controls.download, feedback);
-    panel.append(period, stats, report); host.append(panel);
+    groupStats = element("details", "report-settings"); groupStats.append(element("summary", "", "Сводка по районам и поставщикам"));
+    panel.append(period, stats, groupStats, report); host.append(panel);
+  }
+  function renderGroupStats() {
+    function groups(key, values) {
+      const map = new Map();
+      for (const school of schools) for (const value of values(school)) { if (!value) continue; if (!map.has(value)) map.set(value, []); if (!map.get(value).includes(school)) map.get(value).push(school); }
+      const table = element("table"), header = element("tr"); for (const text of [key, "Школы", "Устройства", "На связи", "Проблемные линии", "Без свежих замеров"]) header.append(element("th", "", text));
+      const body = element("tbody"); for (const [name, items] of [...map].sort((a,b) => a[0].localeCompare(b[0], "ru"))) { const total = summarize(items), row = element("tr"); for (const value of [name, total.schools, total.devices, total.activeDevices, total.problemLines, total.missingLines]) row.append(element("td", "", String(value))); body.append(row); }
+      table.append(header, body); return table;
+    }
+    const wrap = element("div", "group-summary-grid"), district = element("section"), provider = element("section");
+    district.append(element("h3", "", "Районы и города"), groups("Район / город", school => [school.districtCity || "Не указан"]));
+    provider.append(element("h3", "", "Поставщики"), groups("Поставщик", school => [...new Set(school.lines.filter(line => line.lineStatus !== "Disabled").map(line => line.providerName || "Не указан"))]));
+    wrap.append(district, provider); groupStats.replaceChildren(element("summary", "", "Сводка по районам и поставщикам"), wrap);
   }
   function errorMessage(error) {
     if (error.status === 401) { onUnauthorized(); return ""; }
@@ -141,6 +155,7 @@ export function createOverviewTools({ request, getSession, onUnauthorized, eleme
   async function refresh(nextSchools) {
     schools = nextSchools;
     if (!controls) initialise();
+    renderGroupStats();
     const selected = controls.school.value;
     controls.school.replaceChildren(...[["", "Все доступные школы"], ...schools.map(school => [school.schoolId, school.name])].map(([value, text]) => { const option = element("option", "", text); option.value = value; return option; }));
     controls.school.value = schools.some(school => school.schoolId === selected) ? selected : "";

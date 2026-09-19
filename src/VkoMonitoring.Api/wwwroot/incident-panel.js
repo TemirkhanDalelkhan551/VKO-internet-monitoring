@@ -103,6 +103,14 @@ export function createIncidentPanel({ element, request, getSession, onUnauthoriz
   function showDetails({ incident: row, history }) {
     detail.replaceChildren(button("Закрыть карточку инцидента", closeDetail), element("h3", "", `${row.incidentNumber} · ${row.title}`), button("Обновить инцидент", () => open(row.incidentId)));
     for (const text of [`${row.schoolName} · ${row.lineName} · ${row.providerName || "Поставщик не указан"}`, `${incidentStatuses[row.status]} · ${row.source === "Automatic" ? "Автоматический" : "Ручной"} · ${row.problemType}`, row.description, `Ответственный: ${row.assignedTo || "не назначен"}`, `Начало: ${timestamp(row.startedAtUtc)} · длительность: ${incidentDuration(row.durationSeconds)}`, `Обнаружен: ${timestamp(row.detectedAtUtc)}`, `Передан: ${timestamp(row.sentToProviderAtUtc)} · восстановлен: ${timestamp(row.recoveredAtUtc)} · закрыт: ${timestamp(row.closedAtUtc)}`]) detail.append(element("p", "incident-text", text));
+    const appeal = element("details", "incident-create"), appealSummary = element("summary", "", "Обращение провайдеру");
+    const appealText = element("textarea"); appealText.rows = 12; appealText.maxLength = 8000;
+    appealText.value = `Поставщику: ${row.providerName || "не указан"}\nПо организации: ${row.schoolName}\nЛиния: ${row.lineName}\nИнцидент: ${row.incidentNumber}\nДата начала: ${timestamp(row.startedAtUtc)}\nТип проблемы: ${row.problemType}\n\nОписание:\n${row.description}\n\nПросим проверить качество и доступность услуги, сообщить причину нарушения и срок восстановления.`;
+    const confirmed = element("input"); confirmed.type = "checkbox"; const confirmLabel = element("label", "admin-check"); confirmLabel.append(confirmed, element("span", "", "Я проверил текст, адресата и факты перед передачей"));
+    const appealFeedback = element("p", "section-note"); appealFeedback.setAttribute("role", "status");
+    const copyAppeal = button("Скопировать текст", async () => { if (!confirmed.checked) { appealFeedback.textContent = "Сначала проверьте текст и подтвердите проверку."; return; } try { await navigator.clipboard.writeText(appealText.value); appealFeedback.textContent = "Текст скопирован."; } catch { appealFeedback.textContent = "Не удалось скопировать автоматически. Выделите текст вручную."; } });
+    const printAppeal = button("Печать / сохранить PDF", () => { if (!confirmed.checked) { appealFeedback.textContent = "Сначала проверьте текст и подтвердите проверку."; return; } const frame = document.createElement("iframe"); frame.hidden = true; document.body.append(frame); const doc = frame.contentDocument; doc.open(); doc.write(`<title>${escapeHtml(row.incidentNumber)}</title><style>body{font:14pt Arial;line-height:1.5;margin:25mm}h1{font-size:20pt}pre{white-space:pre-wrap;font:inherit}</style><h1>Обращение провайдеру</h1><pre>${escapeHtml(appealText.value)}</pre>`); doc.close(); frame.contentWindow.focus(); frame.contentWindow.print(); setTimeout(() => frame.remove(), 1000); });
+    appeal.append(appealSummary, element("p", "section-note", "Текст создан по данным инцидента без ИИ. Отредактируйте и подтвердите его; затем распечатайте или выберите «Сохранить как PDF» в окне печати."), appealText, confirmLabel, copyAppeal, printAppeal, appealFeedback); detail.append(appeal);
     const changes = element("div", "directory-grid");
     function changeForm(heading, path, method, inputs, body) {
       const form = element("form", "directory-form"); form.append(element("h4", "", heading));
@@ -131,6 +139,7 @@ export function createIncidentPanel({ element, request, getSession, onUnauthoriz
     for (const entry of history) { const item = element("li"); item.append(element("p", "incident-text", `${timestamp(entry.occurredAtUtc)} · ${actions[entry.action] || entry.action} · ${entry.actor || "Система"}`)); if (entry.newStatus) item.append(element("p", "incident-text", `${incidentStatuses[entry.previousStatus] || "—"} → ${incidentStatuses[entry.newStatus] || entry.newStatus}`)); if (entry.comment) item.append(element("p", "incident-text", entry.comment)); entries.append(item); }
     detail.append(entries);
   }
+  function escapeHtml(value) { return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
   function configure(available, user) {
     const updatedPermissions = incidentPermissions(user?.role);
     if (JSON.stringify(permissions) !== JSON.stringify(updatedPermissions)) closeDetail();

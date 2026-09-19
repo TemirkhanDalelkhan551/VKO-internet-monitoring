@@ -1,11 +1,13 @@
 using VkoMonitoring.Agent.Core.Abstractions;
 using VkoMonitoring.Agent.Core.Configuration;
 using VkoMonitoring.Agent.Core.Domain;
+using VkoMonitoring.Agent.Core.Services;
 
 namespace VkoMonitoring.Agent;
 
 public sealed class HeartbeatWorker(
     IHeartbeatApiClient apiClient,
+    DailyMeasurementSchedule schedule,
     AgentOptions options,
     TimeProvider timeProvider,
     ILogger<HeartbeatWorker> logger) : BackgroundService
@@ -32,7 +34,9 @@ public sealed class HeartbeatWorker(
 
         try
         {
-            await apiClient.SendAsync(heartbeat, cancellationToken);
+            var configuration = await apiClient.SendAsync(heartbeat, cancellationToken);
+            if (configuration is not null && !schedule.TryUpdateWindows(configuration.MeasurementWindows))
+                logger.LogWarning("Server returned invalid or empty measurement windows; existing schedule is preserved.");
             logger.LogDebug("Heartbeat for device {DeviceId} was accepted.", options.DeviceId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

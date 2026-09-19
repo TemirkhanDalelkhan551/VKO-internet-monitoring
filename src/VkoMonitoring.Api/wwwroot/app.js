@@ -5,6 +5,8 @@ import { createSchoolMap } from "./school-map.js";
 import { createDirectoryPanel } from "./directory-panel.js";
 import { contractShortfalls } from "./directory-model.js";
 import { createIncidentPanel } from "./incident-panel.js";
+import { createAdminPanel } from "./admin-panel.js";
+import { createNotificationPanel } from "./notification-panel.js";
 
 const byId = id => document.getElementById(id);
 const state = { token: null, user: null, expires: 0, epoch: 0, schools: [], loaded: false, loading: false,
@@ -41,7 +43,7 @@ async function request(path, { method = "GET", body, token, signal, responseType
       cache: "no-store", credentials: "omit", signal: controller.signal });
     if (!response.ok) {
       let detail = "";
-      if ([400, 422].includes(response.status)) { try { const problem = await response.json(); detail = problem.detail || problem.error || Object.values(problem.errors || {}).flat().join(" "); } catch {} }
+      if ([400, 409, 422].includes(response.status)) { try { const problem = await response.json(); detail = problem.detail || problem.error || Object.values(problem.errors || {}).flat().join(" "); } catch {} }
       throw new ApiError(response.status, detail);
     }
     if (responseType === "file") return { blob: await response.blob(),
@@ -61,6 +63,8 @@ function endSession(text = "") {
   schoolMap.clear();
   directoryPanel.clear();
   incidentPanel.clear();
+  adminPanel.clear();
+  notificationPanel.clear();
   state.controller?.abort();
   clearTimeout(state.expiryTimer);
   Object.assign(state, { token: null, user: null, expires: 0, schools: [], loaded: false, loading: false, loadedAt: null });
@@ -93,6 +97,7 @@ function showDashboard(user) {
   byId("access-description").textContent = accessDescription(user);
   byId("login-view").hidden = true;
   byId("dashboard-view").hidden = false;
+  byId("open-admin").hidden = user.role !== "Administrator";
   document.title = "Школы и линии · Мониторинг интернета ВКО";
   byId("refresh").focus();
 }
@@ -244,11 +249,14 @@ async function refresh() {
     updateDistricts(); renderSummary(); renderSchools();
     directoryPanel.render(schools, user);
     incidentPanel.configure(schools, user);
+    adminPanel.render(schools, user);
+    notificationPanel.configure(user);
     message("dashboard-message", "");
     byId("updated-at").textContent = `Обновлено ${timestamp(state.loadedAt)}`;
     await overviewTools.refresh(schools);
     if (epoch !== state.epoch) return;
     await incidentPanel.refresh();
+    await notificationPanel.refresh();
     if (schoolPanel.isOpen()) await schoolPanel.refresh();
   } catch (error) {
     if (epoch !== state.epoch) return;
@@ -279,6 +287,13 @@ const directoryPanel = createDirectoryPanel({ element, request,
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
 const incidentPanel = createIncidentPanel({ element, request,
   getSession: () => ({ token: state.token, epoch: state.epoch }),
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
+const adminPanel = createAdminPanel({ element, request,
+  getSession: () => ({ token: state.token, epoch: state.epoch, user: state.user }),
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
+const notificationPanel = createNotificationPanel({ element, request,
+  getSession: () => ({ token: state.token, epoch: state.epoch, user: state.user }),
+  onOpenIncident: schoolId => incidentPanel.showSchool(schoolId),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
 for (const [id, label] of [["provider-filter", "Поставщик"], ["connection-filter", "Тип подключения"]]) {
   const wrap = element("div", "filter"); const select = element("select"); select.id = id;
@@ -330,6 +345,8 @@ byId("logout").addEventListener("click", async () => {
 });
 byId("refresh").addEventListener("click", refresh);
 byId("open-incidents").addEventListener("click", () => { schoolPanel.clear(); document.title = "Школы и линии · Мониторинг интернета ВКО"; incidentPanel.showSchool(""); });
+byId("open-admin").addEventListener("click", () => adminPanel.open());
+byId("open-notifications").addEventListener("click", () => notificationPanel.open());
 for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).addEventListener(id === "search" ? "input" : "change", renderSchools);
 byId("reset-filters").addEventListener("click", () => { for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).value = ""; renderSchools(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);

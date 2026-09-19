@@ -22,6 +22,9 @@ try{
  Check 'code response cannot be cached' ($response.Headers['Cache-Control'] -contains 'no-store')
  $issued=$response.Content|ConvertFrom-Json -DateKind String
  Check 'code and future expiry returned' ($issued.activationCode.Length -gt 10 -and [DateTimeOffset]::Parse($issued.expiresAtUtc) -gt [DateTimeOffset]::UtcNow)
+ $registry=Invoke-RestMethod "$BaseUrl/api/activation-codes?limit=100" -Headers $admin
+ $active=$registry|Where-Object{$_.status -eq 'Active' -and $_.schoolId -eq $school.schoolId -and $_.lineId -eq $line.lineId}|Select-Object -First 1
+ Check 'issued code appears active in registry without plaintext secret' ($null -ne $active -and (($registry|ConvertTo-Json -Depth 6) -notlike "*$($issued.activationCode)*"))
  Check 'malformed preview denied' ((Post '/api/devices/activation-preview' @{activationCode='bad'} @{}).StatusCode -eq 400)
  $preview=Post '/api/devices/activation-preview' @{activationCode=$issued.activationCode} @{}
  Check 'valid code can be previewed without consumption' ($preview.StatusCode -eq 200)
@@ -34,6 +37,13 @@ try{
  Check 'device belongs to selected school and line' ($device.schoolId -eq $school.schoolId -and $device.lineId -eq $line.lineId -and $device.deviceToken.Length -gt 10)
  Check 'code cannot be reused' ((Post '/api/devices/activate' $activate @{}).StatusCode -eq 401)
  Check 'used code cannot be previewed' ((Post '/api/devices/activation-preview' @{activationCode=$issued.activationCode} @{}).StatusCode -eq 401)
+ $beforeIds=@($registry|ForEach-Object activationCodeId)
+ $revocable=(Post '/api/activation-codes' @{schoolId=$school.schoolId;lineId=$line.lineId;lifetimeMinutes=30} $admin).Content|ConvertFrom-Json -DateKind String
+ $registry=Invoke-RestMethod "$BaseUrl/api/activation-codes?limit=100" -Headers $admin
+ $toRevoke=$registry|Where-Object{$_.status -eq 'Active' -and $_.activationCodeId -notin $beforeIds}|Select-Object -First 1
+ Check 'active code can be revoked' ((Post "/api/activation-codes/$($toRevoke.activationCodeId)/revoke" @{} $admin).StatusCode -eq 204)
+ Check 'revoked code cannot be previewed' ((Post '/api/devices/activation-preview' @{activationCode=$revocable.activationCode} @{}).StatusCode -eq 401)
+ Check 'revoking same code twice conflicts' ((Post "/api/activation-codes/$($toRevoke.activationCodeId)/revoke" @{} $admin).StatusCode -eq 409)
  foreach($minutes in @(4,1441)){$body.lifetimeMinutes=$minutes;Check "invalid lifetime $minutes denied" ((Post '/api/activation-codes' $body $admin).StatusCode -eq 400)}
  $body.lifetimeMinutes=5;$body.lineId=$foreign.lines[0].lineId
  Check 'foreign school-line pairing rejected' ((Post '/api/activation-codes' $body $admin).StatusCode -eq 404)

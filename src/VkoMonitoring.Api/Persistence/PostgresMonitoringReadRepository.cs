@@ -11,6 +11,7 @@ namespace VkoMonitoring.Api.Persistence;
 public sealed class PostgresMonitoringReadRepository(
     NpgsqlDataSource dataSource,
     MonitoringApiOptions options,
+    IOperationalSettingsRepository settingsRepository,
     TimeProvider timeProvider,
     MonitoringAccessContext access) : IMonitoringReadRepository
 {
@@ -119,6 +120,7 @@ public sealed class PostgresMonitoringReadRepository(
         command.Parameters.AddWithValue(schoolId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var devices = new List<DeviceOverview>();
+        var thresholds = ToThresholds(await settingsRepository.GetAsync(cancellationToken));
 
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -135,7 +137,7 @@ public sealed class PostgresMonitoringReadRepository(
                 GetNullableDateTimeOffset(reader, 6),
                 GetNullableString(reader, 7),
                 reader.GetBoolean(8),
-                MonitoringStatusEvaluator.Evaluate(measurement, options.Thresholds),
+                MonitoringStatusEvaluator.Evaluate(measurement, thresholds),
                 ToSnapshot(measurement)), timeProvider.GetUtcNow(), options));
         }
 
@@ -319,6 +321,7 @@ public sealed class PostgresMonitoringReadRepository(
             ORDER BY l.school_id, l.name, l.id;
             """;
         var now = timeProvider.GetUtcNow();
+        var thresholds = ToThresholds(await settingsRepository.GetAsync(cancellationToken));
         await using var command = dataSource.CreateCommand(sql.Replace("/* access */", access.SqlCondition("l.id")));
         command.Parameters.AddWithValue(now.AddMinutes(-options.DeviceActiveWindowMinutes));
         command.Parameters.Add(new NpgsqlParameter
@@ -339,7 +342,7 @@ public sealed class PostgresMonitoringReadRepository(
                 GetNullableString(reader, 4), GetNullableString(reader, 5),
                 GetNullableDouble(reader, 6), GetNullableDouble(reader, 7),
                 reader.GetInt32(8), reader.GetInt32(9), GetNullableDateTimeOffset(reader, 10),
-                MonitoringStatusEvaluator.Evaluate(measurement, options.Thresholds),
+                MonitoringStatusEvaluator.Evaluate(measurement, thresholds),
                 ToSnapshot(measurement))
             {
                 ContractNumber = GetNullableString(reader, 20),
@@ -349,6 +352,16 @@ public sealed class PostgresMonitoringReadRepository(
 
         return lines;
     }
+
+    private static QualityThresholdOptions ToThresholds(OperationalSettings value) => new()
+    {
+        MinimumDownloadMbps = value.MinimumDownloadMbps,
+        MinimumUploadMbps = value.MinimumUploadMbps,
+        MaximumPingMilliseconds = value.MaximumPingMilliseconds,
+        MaximumJitterMilliseconds = value.MaximumJitterMilliseconds,
+        MaximumPacketLossPercent = value.MaximumPacketLossPercent,
+        MinimumAvailabilityPercent = value.MinimumAvailabilityPercent
+    };
 
     private static InternetMeasurement? ReadLatestMeasurement(
         NpgsqlDataReader reader,

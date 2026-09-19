@@ -12,6 +12,12 @@ public interface IDeviceActivationRepository
         DateTimeOffset expiresAtUtc,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<ActivationCodeOverview>> ListCodesAsync(
+        int limit,
+        CancellationToken cancellationToken);
+
+    Task<bool> RevokeCodeAsync(Guid activationCodeId, CancellationToken cancellationToken);
+
     Task<ActivationCodePreviewResult?> PreviewAsync(
         byte[] codeHash,
         CancellationToken cancellationToken);

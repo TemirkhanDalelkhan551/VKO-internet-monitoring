@@ -52,7 +52,8 @@ builder.Logging.AddProvider(new RollingFileLoggerProvider(new RollingTextFileWri
 
 builder.Services.AddSingleton(agentOptions);
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IMeasurementSchedule, DailyMeasurementSchedule>();
+builder.Services.AddSingleton<DailyMeasurementSchedule>();
+builder.Services.AddSingleton<IMeasurementSchedule>(provider => provider.GetRequiredService<DailyMeasurementSchedule>());
 builder.Services.AddSingleton<IMeasurementOutbox, JsonFileMeasurementOutbox>();
 builder.Services.AddSingleton<MeasurementCollector>();
 builder.Services.AddSingleton<OutboxDispatcher>();

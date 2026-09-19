@@ -40,6 +40,13 @@ try {
  $binding=$reg.data;$dh=@{'X-Device-Token'=$binding.deviceToken}
  $hb=@{schoolId=$binding.schoolId;deviceId=$binding.deviceId;lineId=$binding.lineId;sentAtUtc=[DateTimeOffset]::UtcNow.ToString('o');agentVersion='verification'}
  Check 'heartbeat' ((Req POST '/api/devices/heartbeat' $hb $dh).code -eq 204)
+ $settings=Req GET '/api/settings/operations' $null $admin
+ Check 'operational_settings_read' ($settings.code -eq 200 -and @($settings.data.measurementWindows).Count -eq 4)
+ Check 'operational_settings_invalid_rejected' ((Req PUT '/api/settings/operations' @{measurementWindows=@('bad');minimumDownloadMbps=20;minimumUploadMbps=20;maximumPingMilliseconds=100;maximumJitterMilliseconds=30;maximumPacketLossPercent=2;minimumAvailabilityPercent=99} $admin).code -eq 400)
+ $updatedSettings=Req PUT '/api/settings/operations' @{measurementWindows=@('09:00-10:00','15:00-16:00');minimumDownloadMbps=25;minimumUploadMbps=15;maximumPingMilliseconds=90;maximumJitterMilliseconds=25;maximumPacketLossPercent=1.5;minimumAvailabilityPercent=98.5} $admin
+ Check 'operational_settings_update' ($updatedSettings.code -eq 200 -and $updatedSettings.data.minimumDownloadMbps -eq 25)
+ $configuration=Req GET "/api/devices/configuration?schoolId=$($binding.schoolId)&deviceId=$($binding.deviceId)&lineId=$($binding.lineId)" $null $dh
+ Check 'agent_receives_remote_schedule' ($configuration.code -eq 200 -and @($configuration.data.measurementWindows).Count -eq 2 -and $configuration.data.measurementWindows[0] -eq '09:00-10:00')
  $bad=$hb.Clone();$bad.schoolId=[guid]::NewGuid().ToString()
  Check 'school_spoof_rejected' ((Req POST '/api/devices/heartbeat' $bad $dh).code -eq 401)
  $bad=$hb.Clone();$bad.lineId=[guid]::NewGuid().ToString()

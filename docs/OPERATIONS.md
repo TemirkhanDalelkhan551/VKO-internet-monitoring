@@ -14,7 +14,7 @@ Workflow `.github/workflows/ci.yml` запускается для каждого
 
 ```powershell
 .\scripts\verify-installer.ps1 `
-  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.2.1-win-x64.exe
+  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.3.0-win-x64.exe
 ```
 
 После получения сертификата используйте `-RequireValidSignature`, чтобы неподписанная сборка завершала проверку ошибкой.
@@ -24,7 +24,7 @@ Workflow `.github/workflows/ci.yml` запускается для каждого
 Текущий Inno Setup поддерживает тихий режим. Для уже активированного компьютера обновление сохраняет конфигурацию и DPAPI-токен:
 
 ```powershell
-.\VkoInternetMonitoringAgent-Setup-1.2.1-win-x64.exe `
+.\VkoInternetMonitoringAgent-Setup-1.3.0-win-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LOG="$env:TEMP\vko-agent-install.log"
 ```

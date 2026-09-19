@@ -1,14 +1,13 @@
 using Npgsql;
 using NpgsqlTypes;
 using VkoMonitoring.Agent.Core.Domain;
-using VkoMonitoring.Api.Configuration;
 using VkoMonitoring.Api.Security;
 
 namespace VkoMonitoring.Api.Persistence;
 
 public sealed class PostgresMeasurementRepository(
     NpgsqlDataSource dataSource,
-    MonitoringApiOptions options,
+    IOperationalSettingsRepository settingsRepository,
     MonitoringAccessContext access) : IMeasurementRepository
 {
     public async Task<bool> AddIfNotExistsAsync(
@@ -35,6 +34,7 @@ public sealed class PostgresMeasurementRepository(
             ON CONFLICT (event_id) DO NOTHING;
             """;
 
+        var settings = await settingsRepository.GetAsync(cancellationToken);
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue(measurement.EventId);
         command.Parameters.AddWithValue(measurement.SchoolId);
@@ -54,11 +54,11 @@ public sealed class PostgresMeasurementRepository(
         command.Parameters.AddWithValue((object?)measurement.ExternalIpAddress ?? DBNull.Value);
         command.Parameters.AddWithValue(measurement.NetworkConnectionType.ToString());
         command.Parameters.AddWithValue((object?)measurement.MeasurementServer ?? DBNull.Value);
-        command.Parameters.AddWithValue(options.Thresholds.MinimumDownloadMbps);
-        command.Parameters.AddWithValue(options.Thresholds.MinimumUploadMbps);
-        command.Parameters.AddWithValue(options.Thresholds.MaximumPingMilliseconds);
-        command.Parameters.AddWithValue(options.Thresholds.MaximumJitterMilliseconds);
-        command.Parameters.AddWithValue(options.Thresholds.MaximumPacketLossPercent);
+        command.Parameters.AddWithValue(settings.MinimumDownloadMbps);
+        command.Parameters.AddWithValue(settings.MinimumUploadMbps);
+        command.Parameters.AddWithValue(settings.MaximumPingMilliseconds);
+        command.Parameters.AddWithValue(settings.MaximumJitterMilliseconds);
+        command.Parameters.AddWithValue(settings.MaximumPacketLossPercent);
 
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }

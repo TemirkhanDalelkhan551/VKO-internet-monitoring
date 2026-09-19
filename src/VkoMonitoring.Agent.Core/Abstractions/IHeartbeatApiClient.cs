@@ -4,5 +4,5 @@ namespace VkoMonitoring.Agent.Core.Abstractions;
 
 public interface IHeartbeatApiClient
 {
-    Task SendAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken);
+    Task<AgentRuntimeConfiguration?> SendAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken);
 }
