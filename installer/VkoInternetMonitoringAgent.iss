@@ -1,5 +1,5 @@
 #define ProductName "Мониторинг интернета ВКО"
-#define ProductVersion "1.2.0"
+#define ProductVersion "1.2.1"
 #define ProductPublisher "Команда хакатона ВКО"
 #define ServiceName "VkoInternetMonitoringAgent"
 
@@ -50,10 +50,28 @@ Filename: "{sys}\sc.exe"; Parameters: "stop {#ServiceName}"; Flags: runhidden wa
 Filename: "{sys}\sc.exe"; Parameters: "delete {#ServiceName}"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteMonitoringService"
 
 [Code]
+var
+  ServiceWasRunningBeforeInstall: Boolean;
+
 function IsActivated(): Boolean;
 begin
   Result := FileExists(
     ExpandConstant('{commonappdata}\VkoInternetMonitoringAgent\device-token.dat'));
+end;
+
+function IsServiceRunning(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ' +
+    '"$service = Get-Service -Name ''{#ServiceName}'' -ErrorAction SilentlyContinue; ' +
+    'if ($null -ne $service -and $service.Status -eq ''Running'') { exit 0 }; exit 1"',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) and (ResultCode = 0);
 end;
 
 procedure StopServiceIfInstalled();
@@ -96,14 +114,38 @@ begin
     RaiseException('Не удалось установить или обновить службу мониторинга.');
 end;
 
+procedure RestoreRunningService();
+var
+  ResultCode: Integer;
+begin
+  if not ServiceWasRunningBeforeInstall then
+    exit;
+
+  if not Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ' +
+    '"$service = Get-Service -Name ''{#ServiceName}'' -ErrorAction Stop; ' +
+    'if ($service.Status -ne ''Running'') { Start-Service -Name ''{#ServiceName}'' }; ' +
+    '$service.WaitForStatus(''Running'', [TimeSpan]::FromSeconds(30))"',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) or (ResultCode <> 0) then
+    RaiseException(
+      'Служба работала до обновления, но её не удалось запустить после установки.');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  ServiceWasRunningBeforeInstall := IsServiceRunning();
   StopServiceIfInstalled();
   Result := '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  if CurStep = ssPostInstall then begin
     ConfigureService();
+    RestoreRunningService();
+  end;
 end;

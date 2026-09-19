@@ -5,17 +5,40 @@ namespace VkoMonitoring.Agent.Setup.Status;
 
 public sealed class LocalMeasurementRequestService(
     SetupPaths paths,
-    Func<bool>? isServiceRunning = null)
+    Func<bool>? isServiceRunning = null,
+    Action? startService = null)
 {
-    private readonly Func<bool> isServiceRunning =
-        isServiceRunning ?? new WindowsAgentService().IsRunning;
+    private readonly WindowsAgentService defaultWindowsService = new();
+    private readonly Func<bool>? configuredIsServiceRunning = isServiceRunning;
+    private readonly Action? configuredStartService = startService;
 
-    public async Task RequestAsync(CancellationToken cancellationToken)
+    public async Task<LocalMeasurementRequestResult> RequestAsync(
+        CancellationToken cancellationToken)
     {
-        if (!isServiceRunning())
+        var isRunning = configuredIsServiceRunning ?? defaultWindowsService.IsRunning;
+        var start = configuredStartService ?? defaultWindowsService.Start;
+        var serviceWasStarted = false;
+        if (!isRunning())
         {
-            throw new InvalidOperationException(
-                "Служба мониторинга не запущена. Запустите или повторно настройте агент.");
+            try
+            {
+                start();
+                serviceWasStarted = true;
+            }
+            catch (Exception exception)
+            {
+                throw new InvalidOperationException(
+                    "Служба мониторинга остановлена, и автоматически запустить её не удалось. " +
+                    "Откройте журнал работы или повторно запустите установщик.",
+                    exception);
+            }
+
+            if (!isRunning())
+            {
+                throw new InvalidOperationException(
+                    "Служба мониторинга была запущена, но сразу остановилась. " +
+                    "Откройте журнал работы для диагностики.");
+            }
         }
 
         Directory.CreateDirectory(paths.DataDirectory);
@@ -28,6 +51,7 @@ public sealed class LocalMeasurementRequestService(
                 DateTimeOffset.UtcNow.ToString("O"),
                 cancellationToken);
             File.Move(temporaryPath, requestPath, overwrite: true);
+            return new LocalMeasurementRequestResult(serviceWasStarted);
         }
         finally
         {
@@ -38,3 +62,5 @@ public sealed class LocalMeasurementRequestService(
         }
     }
 }
+
+public sealed record LocalMeasurementRequestResult(bool ServiceWasStarted);

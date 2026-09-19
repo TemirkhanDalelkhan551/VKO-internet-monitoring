@@ -291,11 +291,14 @@ public sealed class DeviceStatusForm : Form
         measureNowButton.Text = "Передаём запрос…";
         try
         {
-            await measurementRequestService.RequestAsync(CancellationToken.None);
+            var result = await measurementRequestService.RequestAsync(CancellationToken.None);
             measuredAt.Text =
                 "Тестовый замер запрошен. Обычно результат появляется через 1–3 минуты; " +
                 "при высокой нагрузке — позднее.";
             MessageBox.Show(
+                (result.ServiceWasStarted
+                    ? "Остановленная служба запущена автоматически. "
+                    : string.Empty) +
                 "Запрос передан службе. Окно можно закрыть: измерение и доставка продолжатся в фоне. " +
                 "Нажмите «Обновить» через 1–3 минуты.",
                 "Тестовый замер запущен",
@@ -448,7 +451,7 @@ public sealed class DeviceStatusForm : Form
             $"Windows: {RuntimeInformation.OSDescription}",
             $"Архитектура: {RuntimeInformation.OSArchitecture}",
             $"Компьютер: {Environment.MachineName}",
-            $"Служба: {(view?.IsServiceRunning == true ? "работает" : "не подтверждена")}",
+            $"Служба: {FormatServiceState(view)}",
             $"Сервер: {view?.ServerAddress.ToString() ?? TryGetServerAddress()}",
             $"Устройство: {device?.Name ?? "нет данных"}",
             $"Device ID: {device?.DeviceId.ToString("D") ?? "нет данных"}",
@@ -490,6 +493,13 @@ public sealed class DeviceStatusForm : Form
             return "не удалось прочитать";
         }
     }
+
+    private static string FormatServiceState(LocalStatusView? view) => view switch
+    {
+        null => "не удалось проверить",
+        { IsServiceRunning: true } => "работает",
+        _ => "остановлена"
+    };
 
     private void OpenSetup(object? sender, EventArgs eventArgs)
     {
