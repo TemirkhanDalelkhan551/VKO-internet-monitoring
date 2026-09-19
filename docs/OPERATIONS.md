@@ -4,7 +4,7 @@
 
 ## Автоматическая проверка изменений
 
-Workflow `.github/workflows/ci.yml` запускается для каждого push и pull request. На чистом Windows runner он восстанавливает зависимости, собирает Release, выполняет .NET- и JS-тесты и проверяет синтаксис всех PowerShell-скриптов. Workflow не содержит рабочих токенов и паролей.
+Workflow `.github/workflows/ci.yml` запускается для каждого push и pull request. На чистом Windows runner он восстанавливает зависимости, собирает Release, выполняет .NET- и JS-тесты, проверяет известные уязвимости прямых и транзитивных NuGet-пакетов и синтаксис всех PowerShell-скриптов. Workflow не содержит рабочих токенов и паролей. Dependabot еженедельно проверяет NuGet и используемые GitHub Actions.
 
 ## Проверка установщика
 
@@ -51,25 +51,29 @@ Workflow `.github/workflows/ci.yml` запускается для каждого
 Запустите контейнер PostgreSQL и выполните:
 
 ```powershell
-.\scripts\backup-postgres.ps1
+.\scripts\backup-postgres.ps1 -RetentionDays 30
 ```
 
-Скрипт создаёт custom-format dump без владельца и ACL, проверяет его через `pg_restore --list`, копирует в `artifacts\backups` и выводит SHA-256. Каталог `artifacts` исключён из Git.
+Скрипт создаёт custom-format dump без владельца и ACL, проверяет его через `pg_restore --list`, копирует в `artifacts\backups`, выводит SHA-256 и удаляет только принадлежащие выбранной базе `.dump` старше заданного срока. Каталог `artifacts` исключён из Git.
 
-Для проверки восстановления используйте только новую тестовую базу:
+Автоматическая проверка восстановления создаёт базу со случайным именем `vko_restore_check_*`, восстанавливает dump, сравнивает количество строк в десяти основных таблицах и удаляет только эту тестовую базу:
 
 ```powershell
-$backup = Get-ChildItem .\artifacts\backups\*.dump |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1
-docker exec vko-monitoring-postgres-1 createdb -U vko_monitoring vko_restore_check
-docker cp $backup.FullName vko-monitoring-postgres-1:/tmp/vko-restore.dump
-docker exec vko-monitoring-postgres-1 pg_restore `
-  -U vko_monitoring -d vko_restore_check `
-  --exit-on-error --no-owner --no-privileges /tmp/vko-restore.dump
+.\scripts\verify-postgres-restore.ps1
 ```
 
-После проверки сравните количество основных таблиц с исходной базой. Автоматическое расписание, шифрование, перенос копии во внешнее хранилище и политика удаления старых копий остаются отдельными эксплуатационными задачами.
+Автоматическое расписание, шифрование и перенос копии во внешнее хранилище остаются отдельными эксплуатационными задачами.
+
+## Диагностический архив агента
+
+На проблемном компьютере запустите PowerShell с правами администратора:
+
+```powershell
+.\scripts\collect-agent-diagnostics.ps1 `
+  -OutputDirectory "$env:USERPROFILE\Desktop"
+```
+
+ZIP содержит версию Windows и агента, состояние службы, свободное место, количество и размер файлов очереди, очищенную конфигурацию и последние строки журналов. `device-token.dat` и содержимое очереди не включаются; распространённые значения токенов, паролей и секретов заменяются на `[REDACTED]`. Перед передачей архива за пределы организации его всё равно необходимо просмотреть.
 
 ## Быстрая проверка доступности интерфейса
 

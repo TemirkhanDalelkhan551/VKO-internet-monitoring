@@ -2,7 +2,9 @@ param(
     [string]$Container = 'vko-monitoring-postgres-1',
     [string]$Database = 'vko_monitoring',
     [string]$User = 'vko_monitoring',
-    [string]$OutputDirectory = 'artifacts\backups'
+    [string]$OutputDirectory = 'artifacts\backups',
+    [ValidateRange(1, 3650)]
+    [int]$RetentionDays = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,10 +52,20 @@ finally {
 
 $backup = Get-Item -LiteralPath $destination
 $hash = Get-FileHash -LiteralPath $destination -Algorithm SHA256
+$expired = @(Get-ChildItem -LiteralPath $OutputDirectory -Filter "${Database}-*.dump" -File |
+    Where-Object {
+        $_.FullName -ne $backup.FullName -and
+        $_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddDays(-$RetentionDays)
+    })
+foreach ($expiredBackup in $expired) {
+    Remove-Item -LiteralPath $expiredBackup.FullName -Force
+}
 [PSCustomObject]@{
     Path = $backup.FullName
     Database = $Database
     SizeBytes = $backup.Length
     Sha256 = $hash.Hash
+    RetentionDays = $RetentionDays
+    RemovedExpiredBackups = $expired.Count
     CreatedAt = [DateTimeOffset]::Now
 }

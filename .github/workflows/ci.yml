@@ -35,6 +35,10 @@ jobs:
       - name: Test .NET
         run: dotnet test VkoInternetMonitoring.sln --configuration Release --no-build
 
+      - name: Audit NuGet dependencies
+        shell: pwsh
+        run: .\scripts\check-vulnerable-packages.ps1
+
       - name: Test web models
         shell: pwsh
         run: |
