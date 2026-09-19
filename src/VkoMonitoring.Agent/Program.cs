@@ -72,6 +72,7 @@ else
 builder.Services.AddSingleton<ILatencyProbe, IcmpLatencyProbe>();
 builder.Services.AddSingleton<INetworkContextProvider, NetworkContextProvider>();
 builder.Services.AddSingleton<IInternetMeasurementService, HttpInternetMeasurementService>();
+builder.Services.AddSingleton<IMeasurementTrigger, FileMeasurementTrigger>();
 
 builder.Services.AddHttpClient<IThroughputProbe, HttpThroughputProbe>(client =>
 {

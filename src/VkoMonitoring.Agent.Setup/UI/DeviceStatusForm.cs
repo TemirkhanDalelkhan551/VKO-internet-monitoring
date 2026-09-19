@@ -13,6 +13,7 @@ public sealed class DeviceStatusForm : Form
 
     private readonly LocalDeviceStatusService statusService;
     private readonly ActivationWorkflow activationWorkflow;
+    private readonly LocalMeasurementRequestService measurementRequestService;
     private readonly Label connectionState = CreateValueLabel("Загрузка…", 18F);
     private readonly Label deviceDetails = CreateValueLabel("—", 10F);
     private readonly Label serviceState = CreateValueLabel("—", 11F);
@@ -26,6 +27,7 @@ public sealed class DeviceStatusForm : Form
     private readonly Label measuredAt = CreateValueLabel("Данных измерения пока нет", 9F);
     private readonly DataGridView history = new();
     private readonly Button refreshButton = new();
+    private readonly Button measureNowButton = new();
     private readonly Button diagnosticsButton = new();
     private readonly Button setupButton = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 60_000 };
@@ -36,10 +38,12 @@ public sealed class DeviceStatusForm : Form
 
     public DeviceStatusForm(
         LocalDeviceStatusService statusService,
-        ActivationWorkflow activationWorkflow)
+        ActivationWorkflow activationWorkflow,
+        LocalMeasurementRequestService measurementRequestService)
     {
         this.statusService = statusService;
         this.activationWorkflow = activationWorkflow;
+        this.measurementRequestService = measurementRequestService;
 
         Text = "Мониторинг интернета ВКО — состояние компьютера";
         StartPosition = FormStartPosition.CenterScreen;
@@ -59,6 +63,7 @@ public sealed class DeviceStatusForm : Form
         };
         refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
         refreshButton.Click += async (_, _) => await RefreshStatusAsync();
+        measureNowButton.Click += async (_, _) => await RequestMeasurementAsync();
         diagnosticsButton.Click += (_, _) => CopyDiagnostics();
         setupButton.Click += OpenSetup;
         Load += (_, _) => FitToWorkingArea();
@@ -248,6 +253,14 @@ public sealed class DeviceStatusForm : Form
         refreshButton.FlatStyle = FlatStyle.Flat;
         refreshButton.FlatAppearance.BorderColor = PrimaryColor;
         refreshButton.ForeColor = PrimaryColor;
+        measureNowButton.Text = "Проверить интернет сейчас";
+        measureNowButton.Dock = DockStyle.Right;
+        measureNowButton.Width = 215;
+        measureNowButton.Margin = new Padding(0, 0, 10, 0);
+        measureNowButton.FlatStyle = FlatStyle.Flat;
+        measureNowButton.FlatAppearance.BorderColor = PrimaryColor;
+        measureNowButton.BackColor = PrimaryColor;
+        measureNowButton.ForeColor = Color.White;
         diagnosticsButton.Text = "Скопировать диагностику";
         diagnosticsButton.Dock = DockStyle.Right;
         diagnosticsButton.Width = 205;
@@ -256,8 +269,52 @@ public sealed class DeviceStatusForm : Form
         diagnosticsButton.FlatAppearance.BorderColor = Color.FromArgb(160, 173, 185);
         diagnosticsButton.ForeColor = Color.FromArgb(55, 75, 92);
         panel.Controls.Add(refreshButton);
+        panel.Controls.Add(measureNowButton);
         panel.Controls.Add(diagnosticsButton);
         return panel;
+    }
+
+    private async Task RequestMeasurementAsync()
+    {
+        var choice = MessageBox.Show(
+            "Будет выполнена полная проверка Download, Upload, Ping, Jitter и потерь пакетов. " +
+            "Она использует около 7 МБ трафика и может быть отложена при высокой нагрузке компьютера. Продолжить?",
+            "Проверить интернет сейчас",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (choice != DialogResult.Yes)
+        {
+            return;
+        }
+
+        measureNowButton.Enabled = false;
+        measureNowButton.Text = "Передаём запрос…";
+        try
+        {
+            await measurementRequestService.RequestAsync(CancellationToken.None);
+            measuredAt.Text =
+                "Тестовый замер запрошен. Обычно результат появляется через 1–3 минуты; " +
+                "при высокой нагрузке — позднее.";
+            MessageBox.Show(
+                "Запрос передан службе. Окно можно закрыть: измерение и доставка продолжатся в фоне. " +
+                "Нажмите «Обновить» через 1–3 минуты.",
+                "Тестовый замер запущен",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                exception.Message,
+                "Не удалось запустить тестовый замер",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            measureNowButton.Enabled = true;
+            measureNowButton.Text = "Проверить интернет сейчас";
+        }
     }
 
     private void ConfigureHistory()

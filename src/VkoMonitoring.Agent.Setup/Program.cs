@@ -31,7 +31,8 @@ internal static class Program
             {
                 Application.Run(new DeviceStatusForm(
                     new LocalDeviceStatusService(settingsReader),
-                    activationWorkflow));
+                    activationWorkflow,
+                    new LocalMeasurementRequestService(paths)));
             }
             else
             {

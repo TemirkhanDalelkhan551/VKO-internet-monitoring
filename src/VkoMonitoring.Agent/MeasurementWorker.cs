@@ -8,6 +8,7 @@ public sealed class MeasurementWorker(
     MeasurementCollector collector,
     ISystemLoadGuard systemLoadGuard,
     IMeasurementSchedule schedule,
+    IMeasurementTrigger trigger,
     AgentOptions options,
     TimeProvider timeProvider,
     ILogger<MeasurementWorker> logger) : BackgroundService
@@ -26,7 +27,12 @@ public sealed class MeasurementWorker(
             var delay = nextRun - now;
             logger.LogInformation("Next internet measurement is scheduled for {NextRun}.", nextRun);
 
-            await Task.Delay(delay, timeProvider, stoppingToken);
+            var manuallyRequested = await trigger.WaitForRequestAsync(delay, stoppingToken);
+            if (manuallyRequested)
+            {
+                logger.LogInformation("An immediate internet measurement was requested locally.");
+            }
+
             await CollectSafelyAsync(stoppingToken);
         }
     }

@@ -10,4 +10,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VkoMonitoring.Agent.Core\VkoMonitoring.Agent.Core.csproj" />
+  </ItemGroup>
 </Project>
