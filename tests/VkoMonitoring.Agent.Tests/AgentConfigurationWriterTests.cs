@@ -62,6 +62,9 @@ public sealed class AgentConfigurationWriterTests : IDisposable
         Assert.Equal("http://localhost:5080/", agent["ApiBaseUrl"]!.GetValue<string>());
         Assert.Equal("new-secret-token", clearToken);
         Assert.Equal("1.1.1.1", agent["PingHost"]!.GetValue<string>());
+        Assert.Equal(
+            "http://localhost:5080/",
+            JsonNode.Parse(File.ReadAllText(configurationPath))!["Setup"]!["DefaultApiBaseUrl"]!.GetValue<string>());
     }
 
     [Fact]

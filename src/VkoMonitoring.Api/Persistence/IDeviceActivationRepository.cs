@@ -12,6 +12,10 @@ public interface IDeviceActivationRepository
         DateTimeOffset expiresAtUtc,
         CancellationToken cancellationToken);
 
+    Task<ActivationCodePreviewResult?> PreviewAsync(
+        byte[] codeHash,
+        CancellationToken cancellationToken);
+
     Task<ActivatedDeviceBinding?> ActivateAsync(
         DeviceActivationRequest request,
         Guid deviceId,

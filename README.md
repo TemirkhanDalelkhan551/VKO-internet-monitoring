@@ -6,9 +6,9 @@
 
 Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . На Render опубликован коммит `e130918`: вход, обзор, карточки школ, история и графики, аналитика, CSV/XLSX, карта, справочники и выдача кодов активации. Интерфейс инцидентов добавлен в текущий снимок исходников и проверен локально; его публикация на Render — следующий отдельный шаг.
 
-Полная сводка с проверками и ограничениями: [PROJECT_SNAPSHOT.md](docs/PROJECT_SNAPSHOT.md). Открытые требования: [PROJECT_CHECKLIST.md](docs/PROJECT_CHECKLIST.md). Изменения: [CHANGELOG.md](CHANGELOG.md). Сценарий показа: [DEMO_CHECKLIST.md](docs/DEMO_CHECKLIST.md).
+Полная сводка с проверками и ограничениями: [PROJECT_SNAPSHOT.md](docs/PROJECT_SNAPSHOT.md). Открытые требования: [PROJECT_CHECKLIST.md](docs/PROJECT_CHECKLIST.md). UX-разбор EXE, веб-панели и пользовательских сценариев: [UX_REVIEW_AND_USER_SCENARIOS.md](docs/UX_REVIEW_AND_USER_SCENARIOS.md). Изменения: [CHANGELOG.md](CHANGELOG.md). Сценарий показа: [DEMO_CHECKLIST.md](docs/DEMO_CHECKLIST.md).
 
-Для подключения другого компьютера нужен один файл `VkoInternetMonitoringAgent-Setup-1.0.0-win-x64.exe`. Школу и линию создаёт администратор в панели; там же выдаётся одноразовый код. На другом ПК установщик запускается с правами администратора, в мастере указываются публичный адрес API и код. .NET Runtime отдельно не требуется. Чистая установка на втором физическом ПК пока не проверена. Инструкция: [WEB_ACTIVATION.md](docs/WEB_ACTIVATION.md).
+Для подключения другого компьютера нужен один файл `VkoInternetMonitoringAgent-Setup-1.1.0-win-x64.exe`. Школу и линию создаёт администратор в панели; там же выдаётся одноразовый код. На другом ПК установщик запускается с правами администратора: рабочий адрес API уже заполнен, мастер сначала без расходования кода проверяет сервер и показывает школу/линию, затем активирует компьютер после подтверждения. .NET Runtime отдельно не требуется. EXE 1.1.0 собран локально; перед его рабочим использованием нужно опубликовать совместимый API на Render. Чистая установка на втором физическом ПК пока не проверена. Инструкция: [WEB_ACTIVATION.md](docs/WEB_ACTIVATION.md).
 
 ## Что уже работает
 
@@ -164,7 +164,7 @@ dotnet run --project .\src\VkoMonitoring.Agent -- `
 графическую активацию на новом компьютере:
 
 ```text
-artifacts\installer\VkoInternetMonitoringAgent-Setup-1.0.0-win-x64.exe
+artifacts\installer\VkoInternetMonitoringAgent-Setup-1.1.0-win-x64.exe
 ```
 
 Повторная сборка установщика:

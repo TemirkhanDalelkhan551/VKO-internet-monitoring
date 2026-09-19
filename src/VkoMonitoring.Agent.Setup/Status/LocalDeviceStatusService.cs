@@ -15,6 +15,8 @@ public sealed class LocalDeviceStatusService(
 {
     private readonly WindowsAgentService service = service ?? new WindowsAgentService();
 
+    public Uri GetConfiguredServerAddress() => settingsReader.Read().ApiBaseUri;
+
     public async Task<LocalStatusView> GetAsync(CancellationToken cancellationToken)
     {
         var settings = settingsReader.Read();

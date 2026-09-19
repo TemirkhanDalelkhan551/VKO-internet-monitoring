@@ -32,6 +32,39 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
+    public async Task<ActivationCodePreviewResult?> PreviewAsync(
+        byte[] codeHash,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT c.school_id, s.name, c.line_id, l.name,
+                   l.provider_name, l.connection_type, c.expires_at_utc
+            FROM device_activation_codes c
+            JOIN schools s ON s.id = c.school_id
+            JOIN internet_lines l ON l.id = c.line_id AND l.school_id = c.school_id
+            WHERE c.code_hash = $1
+              AND c.used_at_utc IS NULL
+              AND c.expires_at_utc > now();
+            """;
+
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue(codeHash);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new ActivationCodePreviewResult(
+            reader.GetGuid(0),
+            reader.GetString(1),
+            reader.GetGuid(2),
+            reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.GetFieldValue<DateTimeOffset>(6));
+    }
+
     public async Task<ActivatedDeviceBinding?> ActivateAsync(
         DeviceActivationRequest request,
         Guid deviceId,

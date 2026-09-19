@@ -10,21 +10,27 @@ public sealed class ActivationWorkflow(
     private readonly AgentConfigurationWriter configurationWriter = configurationWriter ?? new AgentConfigurationWriter();
     private readonly InstallationIdentityProvider identityProvider = identityProvider ?? new InstallationIdentityProvider();
 
+    public async Task<AgentActivationPreviewResult> PreflightAsync(
+        ActivationInput input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        PrepareLocalSystem();
+        using var httpClient = CreateHttpClient(input.ServerAddress, TimeSpan.FromSeconds(75));
+        return await new ActivationApiClient(httpClient).CheckAndPreviewAsync(
+            input.ActivationCode,
+            cancellationToken);
+    }
+
     public async Task<AgentActivationResult> ExecuteAsync(
         ActivationInput input,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        paths.EnsureAgentIsInstalled();
-        service.EnsureInstalled();
-        EnsureWritable(paths.ConfigurationPath, paths.DataDirectory);
+        PrepareLocalSystem();
 
         var deviceIdentifier = identityProvider.GetOrCreate(paths.DataDirectory);
-        using var httpClient = new HttpClient
-        {
-            BaseAddress = input.ServerAddress,
-            Timeout = TimeSpan.FromSeconds(30)
-        };
+        using var httpClient = CreateHttpClient(input.ServerAddress, TimeSpan.FromSeconds(30));
         var activation = await new ActivationApiClient(httpClient).ActivateAsync(
             new AgentActivationRequest(
                 input.ActivationCode,
@@ -61,10 +67,36 @@ public sealed class ActivationWorkflow(
         return activation;
     }
 
+    private void PrepareLocalSystem()
+    {
+        if (!Environment.Is64BitOperatingSystem || !OperatingSystem.IsWindowsVersionAtLeast(10))
+        {
+            throw new InvalidOperationException(
+                "Для агента требуется 64-битная Windows 10 или Windows 11.");
+        }
+
+        paths.EnsureAgentIsInstalled();
+        service.EnsureInstalled();
+        EnsureWritable(paths.ConfigurationPath, paths.DataDirectory);
+    }
+
+    private static HttpClient CreateHttpClient(Uri serverAddress, TimeSpan timeout) => new()
+    {
+        BaseAddress = serverAddress,
+        Timeout = timeout
+    };
+
     private static void EnsureWritable(string configurationPath, string dataDirectory)
     {
         _ = File.ReadAllText(configurationPath);
         Directory.CreateDirectory(dataDirectory);
+        var root = Path.GetPathRoot(Path.GetFullPath(dataDirectory));
+        if (string.IsNullOrWhiteSpace(root) ||
+            new DriveInfo(root).AvailableFreeSpace < 100L * 1024 * 1024)
+        {
+            throw new InvalidOperationException(
+                "Для установки и журналов требуется не менее 100 МБ свободного места.");
+        }
 
         foreach (var directory in new[] { Path.GetDirectoryName(configurationPath), dataDirectory })
         {

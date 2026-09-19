@@ -502,6 +502,39 @@ app.MapPost(
     .RequireRateLimiting("admin-write");
 
 app.MapPost(
+    "/api/devices/activation-preview",
+    async (
+        VkoMonitoring.Api.Models.ActivationCodePreviewRequest request,
+        IDeviceActivationRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                "Device activation requires PostgreSQL storage.",
+                statusCode: StatusCodes.Status501NotImplemented);
+        }
+
+        if (!ActivationCodeProtector.IsValidFormat(request.ActivationCode))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["activationCode"] = ["A valid activation code is required."]
+            });
+        }
+
+        var preview = await repository.PreviewAsync(
+            ActivationCodeProtector.Hash(request.ActivationCode),
+            cancellationToken);
+        return preview is null
+            ? Results.Json(
+                new { error = "Activation code is invalid, expired, or already used." },
+                statusCode: StatusCodes.Status401Unauthorized)
+            : Results.Ok(preview);
+    })
+    .RequireRateLimiting("device-activation");
+
+app.MapPost(
     "/api/devices/activate",
     async (
         VkoMonitoring.Api.Models.DeviceActivationRequest request,

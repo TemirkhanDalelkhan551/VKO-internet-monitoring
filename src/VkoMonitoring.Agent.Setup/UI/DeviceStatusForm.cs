@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using VkoMonitoring.Agent.Setup.Activation;
 using VkoMonitoring.Agent.Setup.Status;
 
@@ -25,10 +26,13 @@ public sealed class DeviceStatusForm : Form
     private readonly Label measuredAt = CreateValueLabel("Данных измерения пока нет", 9F);
     private readonly DataGridView history = new();
     private readonly Button refreshButton = new();
+    private readonly Button diagnosticsButton = new();
     private readonly Button setupButton = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 60_000 };
     private CancellationTokenSource? refreshCancellation;
     private bool refreshInProgress;
+    private LocalStatusView? lastView;
+    private string? lastError;
 
     public DeviceStatusForm(
         LocalDeviceStatusService statusService,
@@ -55,6 +59,7 @@ public sealed class DeviceStatusForm : Form
         };
         refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
         refreshButton.Click += async (_, _) => await RefreshStatusAsync();
+        diagnosticsButton.Click += (_, _) => CopyDiagnostics();
         setupButton.Click += OpenSetup;
         Load += (_, _) => FitToWorkingArea();
         FormClosing += (_, _) =>
@@ -243,7 +248,15 @@ public sealed class DeviceStatusForm : Form
         refreshButton.FlatStyle = FlatStyle.Flat;
         refreshButton.FlatAppearance.BorderColor = PrimaryColor;
         refreshButton.ForeColor = PrimaryColor;
+        diagnosticsButton.Text = "Скопировать диагностику";
+        diagnosticsButton.Dock = DockStyle.Right;
+        diagnosticsButton.Width = 205;
+        diagnosticsButton.Margin = new Padding(0, 0, 10, 0);
+        diagnosticsButton.FlatStyle = FlatStyle.Flat;
+        diagnosticsButton.FlatAppearance.BorderColor = Color.FromArgb(160, 173, 185);
+        diagnosticsButton.ForeColor = Color.FromArgb(55, 75, 92);
         panel.Controls.Add(refreshButton);
+        panel.Controls.Add(diagnosticsButton);
         return panel;
     }
 
@@ -316,6 +329,7 @@ public sealed class DeviceStatusForm : Form
             connectionState.Text = "Нет связи";
             connectionState.ForeColor = Color.Firebrick;
             deviceDetails.Text = exception.Message;
+            lastError = exception.Message;
         }
         finally
         {
@@ -326,6 +340,8 @@ public sealed class DeviceStatusForm : Form
 
     private void Render(LocalStatusView view)
     {
+        lastView = view;
+        lastError = null;
         var device = view.ServerStatus.Device;
         connectionState.Text = TranslateStatus(device.Status);
         connectionState.ForeColor = StatusColor(device.Status);
@@ -363,6 +379,61 @@ public sealed class DeviceStatusForm : Form
         }
     }
 
+    private void CopyDiagnostics()
+    {
+        var view = lastView;
+        var device = view?.ServerStatus.Device;
+        var report = string.Join(Environment.NewLine,
+        [
+            "Диагностика агента мониторинга интернета ВКО",
+            $"Сформировано: {DateTimeOffset.Now:dd.MM.yyyy HH:mm:ss zzz}",
+            $"Версия: {Application.ProductVersion}",
+            $"Windows: {RuntimeInformation.OSDescription}",
+            $"Архитектура: {RuntimeInformation.OSArchitecture}",
+            $"Компьютер: {Environment.MachineName}",
+            $"Служба: {(view?.IsServiceRunning == true ? "работает" : "не подтверждена")}",
+            $"Сервер: {view?.ServerAddress.ToString() ?? TryGetServerAddress()}",
+            $"Устройство: {device?.Name ?? "нет данных"}",
+            $"Device ID: {device?.DeviceId.ToString("D") ?? "нет данных"}",
+            $"Линия ID: {device?.LineId.ToString("D") ?? "нет данных"}",
+            $"Последняя связь: {FormatDate(device?.LastSeenAtUtc)}",
+            $"Статус: {(device is null ? "нет данных" : TranslateStatus(device.Status))}",
+            $"Последняя ошибка: {lastError ?? "нет"}",
+            @"Журнал: C:\ProgramData\VkoInternetMonitoringAgent\logs",
+            "Секреты и токен устройства в этот отчёт не включены."
+        ]);
+
+        try
+        {
+            Clipboard.SetText(report);
+            MessageBox.Show(
+                "Диагностический отчёт скопирован в буфер обмена. Его можно отправить техническому специалисту.",
+                "Диагностика скопирована",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (ExternalException)
+        {
+            MessageBox.Show(
+                report,
+                "Диагностика агента",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+    private string TryGetServerAddress()
+    {
+        try
+        {
+            return statusService.GetConfiguredServerAddress().ToString();
+        }
+        catch
+        {
+            return "не удалось прочитать";
+        }
+    }
+
     private void OpenSetup(object? sender, EventArgs eventArgs)
     {
         var choice = MessageBox.Show(
@@ -375,7 +446,10 @@ public sealed class DeviceStatusForm : Form
             return;
         }
 
-        using var form = new SetupForm(activationWorkflow);
+        using var form = new SetupForm(
+            activationWorkflow,
+            statusService.GetConfiguredServerAddress(),
+            statusService);
         form.ShowDialog(this);
         _ = RefreshStatusAsync();
     }

@@ -43,6 +43,9 @@ public sealed class AgentConfigurationWriter
         agent["DownloadTestUrl"] = new Uri(normalizedBaseUri, "speed/download").AbsoluteUri;
         agent["UploadTestUrl"] = new Uri(normalizedBaseUri, "speed/upload").AbsoluteUri;
         agent["DataDirectory"] = dataDirectory;
+        var setup = root["Setup"] as JsonObject ?? new JsonObject();
+        setup["DefaultApiBaseUrl"] = normalizedBaseUri.AbsoluteUri;
+        root["Setup"] = setup;
 
         var temporaryPath = configurationPath + $".{Guid.NewGuid():N}.tmp";
         try

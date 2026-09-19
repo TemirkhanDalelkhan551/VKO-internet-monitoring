@@ -35,7 +35,10 @@ internal static class Program
             }
             else
             {
-                Application.Run(new SetupForm(activationWorkflow));
+                Application.Run(new SetupForm(
+                    activationWorkflow,
+                    new SetupDefaultsReader(paths).GetServerAddress(),
+                    new LocalDeviceStatusService(settingsReader)));
             }
 
             return 0;
