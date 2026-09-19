@@ -31,4 +31,12 @@ $installer = Get-ChildItem `
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
-Write-Host "Installer built: $($installer.FullName)"
+$verification = & (Join-Path $PSScriptRoot 'verify-installer.ps1') `
+    -InstallerPath $installer.FullName
+$checksumPath = "$($installer.FullName).sha256"
+"$($verification.Sha256)  $($installer.Name)" | Set-Content `
+    -LiteralPath $checksumPath `
+    -Encoding ascii
+
+Write-Host "Installer built and verified: $($installer.FullName)"
+Write-Host "SHA-256 manifest: $checksumPath"
