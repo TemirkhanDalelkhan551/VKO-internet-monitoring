@@ -4,7 +4,7 @@
 
 ## Зафиксированное состояние — 19.09.2026
 
-Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . На Render опубликован коммит `f33c626`: вход, обзор, карточки школ, история и графики, аналитика, CSV/XLSX, карта, справочники, инциденты, пользователи, аудит, устройства, реестр кодов, удалённые настройки, уведомления, сводки и обращение поставщику. Readiness и PostgreSQL проверены как `Healthy`.
+Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . На Render опубликован коммит `cf782a0`: вход, обзор, карточки школ, история и графики, аналитика, CSV/XLSX, карта, справочники, инциденты, пользователи, аудит, устройства, реестр кодов, удалённые настройки, уведомления, сводки и обращение поставщику. Readiness и PostgreSQL проверены как `Healthy`.
 
 Полная сводка с проверками и ограничениями: [PROJECT_SNAPSHOT.md](docs/PROJECT_SNAPSHOT.md). Текущая готовность по полному чек-листу — **92%**: [READINESS_ASSESSMENT.md](docs/READINESS_ASSESSMENT.md). Открытые требования: [PROJECT_CHECKLIST.md](docs/PROJECT_CHECKLIST.md). CI, проверка EXE, тихое обновление, диагностический ZIP, диагностика ресурсов и резервные копии: [OPERATIONS.md](docs/OPERATIONS.md). UX-разбор EXE, веб-панели и пользовательских сценариев: [UX_REVIEW_AND_USER_SCENARIOS.md](docs/UX_REVIEW_AND_USER_SCENARIOS.md). Изменения: [CHANGELOG.md](CHANGELOG.md). Сценарий показа: [DEMO_CHECKLIST.md](docs/DEMO_CHECKLIST.md).
 
