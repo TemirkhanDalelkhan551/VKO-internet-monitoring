@@ -99,7 +99,8 @@ public sealed class PostgresMonitoringReadRepository(
                    latest.event_id, latest.measured_at_utc, latest.download_mbps,
                    latest.upload_mbps, latest.ping_milliseconds,
                    latest.jitter_milliseconds, latest.packet_loss_percent,
-                   latest.connection_status
+                   latest.connection_status, d.lifecycle_status,
+                   d.replaced_by_device_id, d.retired_at_utc, d.retirement_reason
             FROM devices d
             LEFT JOIN LATERAL (
                 SELECT m.event_id, m.measured_at_utc, m.download_mbps,
@@ -138,7 +139,13 @@ public sealed class PostgresMonitoringReadRepository(
                 GetNullableString(reader, 7),
                 reader.GetBoolean(8),
                 MonitoringStatusEvaluator.Evaluate(measurement, thresholds),
-                ToSnapshot(measurement)), timeProvider.GetUtcNow(), options));
+                ToSnapshot(measurement))
+                {
+                    LifecycleStatus = reader.GetString(17),
+                    ReplacedByDeviceId = reader.IsDBNull(18) ? null : reader.GetGuid(18),
+                    RetiredAtUtc = GetNullableDateTimeOffset(reader, 19),
+                    RetirementReason = GetNullableString(reader, 20)
+                }, timeProvider.GetUtcNow(), options));
         }
 
         return devices;

@@ -1,6 +1,7 @@
 param(
     [string]$InstallerPath,
-    [switch]$RequireValidSignature
+    [switch]$RequireValidSignature,
+    [switch]$RequireTimestamp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +45,9 @@ $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
 if ($RequireValidSignature -and $signature.Status -ne 'Valid') {
     throw "Installer signature is $($signature.Status); a valid signature is required."
 }
+if ($RequireTimestamp -and -not $signature.TimeStamperCertificate) {
+    throw 'Installer signature has no trusted timestamp.'
+}
 
 [PSCustomObject]@{
     Path = $installer.FullName
@@ -51,5 +55,7 @@ if ($RequireValidSignature -and $signature.Status -ne 'Valid') {
     SizeBytes = $installer.Length
     Sha256 = $hash.Hash
     SignatureStatus = $signature.Status.ToString()
+    SignerSubject = $signature.SignerCertificate?.Subject
+    TimestampSubject = $signature.TimeStamperCertificate?.Subject
     VerifiedAt = [DateTimeOffset]::Now
 }

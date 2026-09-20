@@ -17,7 +17,7 @@ public sealed record ActivationCodeOverview(
     DateTimeOffset? RevokedAtUtc,
     string Status);
 
-public sealed record ActivationCodePreviewRequest(string ActivationCode);
+public sealed record ActivationCodePreviewRequest(string ActivationCode, string? DeviceIdentifier = null);
 
 public sealed record ActivationCodePreviewResult(
     Guid SchoolId,
@@ -26,7 +26,8 @@ public sealed record ActivationCodePreviewResult(
     string LineName,
     string? ProviderName,
     string? ConnectionType,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    bool IsRecovery);
 
 public sealed record DeviceActivationRequest(
     string ActivationCode,
@@ -39,11 +40,13 @@ public sealed record ActivatedDeviceBinding(
     Guid SchoolId,
     Guid LineId,
     Guid DeviceId,
-    string DeviceIdentifier);
+    string DeviceIdentifier,
+    bool Recovered);
 
 public sealed record DeviceActivationResult(
     Guid SchoolId,
     Guid LineId,
     Guid DeviceId,
     string DeviceIdentifier,
-    string DeviceToken);
+    string DeviceToken,
+    bool Recovered);

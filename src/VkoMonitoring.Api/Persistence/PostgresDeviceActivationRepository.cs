@@ -82,22 +82,31 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
 
     public async Task<ActivationCodePreviewResult?> PreviewAsync(
         byte[] codeHash,
+        string? deviceIdentifier,
         CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT c.school_id, s.name, c.line_id, l.name,
-                   l.provider_name, l.connection_type, c.expires_at_utc
+                   l.provider_name, l.connection_type, c.expires_at_utc,
+                   c.used_at_utc IS NOT NULL
             FROM device_activation_codes c
             JOIN schools s ON s.id = c.school_id
             JOIN internet_lines l ON l.id = c.line_id AND l.school_id = c.school_id
+            LEFT JOIN devices d ON d.id = c.used_by_device_id
             WHERE c.code_hash = $1
-              AND c.used_at_utc IS NULL
               AND c.revoked_at_utc IS NULL
-              AND c.expires_at_utc > now();
+              AND (
+                    (c.used_at_utc IS NULL AND c.expires_at_utc > now())
+                    OR
+                    (c.used_at_utc >= now() - interval '24 hours'
+                     AND d.device_identifier = $2
+                     AND d.lifecycle_status = 'Active')
+                  );
             """;
 
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue(codeHash);
+        AddNullableText(command, deviceIdentifier);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
@@ -111,7 +120,8 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             reader.GetString(3),
             reader.IsDBNull(4) ? null : reader.GetString(4),
             reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.GetFieldValue<DateTimeOffset>(6));
+            reader.GetFieldValue<DateTimeOffset>(6),
+            reader.GetBoolean(7));
     }
 
     public async Task<ActivatedDeviceBinding?> ActivateAsync(
@@ -124,64 +134,105 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        var codeBinding = await LockValidCodeAsync(connection, transaction, codeHash, cancellationToken);
+        var codeBinding = await LockCodeForActivationAsync(
+            connection, transaction, codeHash, deviceIdentifier, cancellationToken);
         if (codeBinding is null)
         {
             return null;
         }
 
-        await InsertDeviceAsync(
-            connection,
-            transaction,
-            request,
-            codeBinding.Value.SchoolId,
-            codeBinding.Value.LineId,
-            deviceId,
-            deviceIdentifier,
-            deviceTokenHash,
-            cancellationToken);
-        await MarkCodeUsedAsync(
-            connection,
-            transaction,
-            codeBinding.Value.CodeId,
-            deviceId,
-            cancellationToken);
+        var effectiveDeviceId = codeBinding.Value.UsedByDeviceId ?? deviceId;
+        if (codeBinding.Value.UsedByDeviceId is null)
+        {
+            await InsertDeviceAsync(
+                connection, transaction, request, codeBinding.Value.SchoolId,
+                codeBinding.Value.LineId, effectiveDeviceId, deviceIdentifier,
+                deviceTokenHash, cancellationToken);
+            await MarkCodeUsedAsync(
+                connection, transaction, codeBinding.Value.CodeId,
+                effectiveDeviceId, cancellationToken);
+        }
+        else
+        {
+            await RecoverDeviceAsync(
+                connection, transaction, request, effectiveDeviceId,
+                deviceTokenHash, cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
 
         return new ActivatedDeviceBinding(
             codeBinding.Value.SchoolId,
             codeBinding.Value.LineId,
-            deviceId,
-            deviceIdentifier);
+            effectiveDeviceId,
+            deviceIdentifier,
+            codeBinding.Value.UsedByDeviceId is not null);
     }
 
-    private static async Task<(Guid CodeId, Guid SchoolId, Guid LineId)?> LockValidCodeAsync(
+    private static async Task<(Guid CodeId, Guid SchoolId, Guid LineId, Guid? UsedByDeviceId)?> LockCodeForActivationAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         byte[] codeHash,
+        string deviceIdentifier,
         CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT id, school_id, line_id
-            FROM device_activation_codes
-            WHERE code_hash = $1
-              AND used_at_utc IS NULL
-              AND revoked_at_utc IS NULL
-              AND expires_at_utc > now()
-            FOR UPDATE;
+            SELECT c.id, c.school_id, c.line_id, c.used_by_device_id
+            FROM device_activation_codes c
+            LEFT JOIN devices d ON d.id = c.used_by_device_id
+            WHERE c.code_hash = $1
+              AND c.revoked_at_utc IS NULL
+              AND (
+                    (c.used_at_utc IS NULL AND c.expires_at_utc > now())
+                    OR
+                    (c.used_at_utc >= now() - interval '24 hours'
+                     AND d.device_identifier = $2
+                     AND d.lifecycle_status = 'Active')
+                  )
+            FOR UPDATE OF c;
             """;
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
         command.Parameters.AddWithValue(codeHash);
+        command.Parameters.AddWithValue(deviceIdentifier);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
             return null;
         }
 
-        return (reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2));
+        return (
+            reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2),
+            reader.IsDBNull(3) ? null : reader.GetGuid(3));
+    }
+
+    private static async Task RecoverDeviceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DeviceActivationRequest request,
+        Guid deviceId,
+        byte[] deviceTokenHash,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            UPDATE devices
+            SET name = $2, room = $3, connection_type = $4,
+                token_hash = $5, is_blocked = false
+            WHERE id = $1 AND lifecycle_status = 'Active';
+            """;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        command.Parameters.AddWithValue(deviceId);
+        command.Parameters.AddWithValue(request.DeviceName.Trim());
+        AddNullableText(command, request.Room);
+        AddNullableText(command, request.ConnectionType);
+        command.Parameters.AddWithValue(deviceTokenHash);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            throw new InvalidOperationException("The device cannot be recovered.");
+        }
     }
 
     private static async Task InsertDeviceAsync(

@@ -41,7 +41,8 @@ public sealed class AgentConfigurationWriterTests : IDisposable
             Guid.NewGuid(),
             Guid.NewGuid(),
             "device-id",
-            "new-secret-token");
+            "new-secret-token",
+            false);
 
         new AgentConfigurationWriter().Save(
             configurationPath,
@@ -69,6 +70,36 @@ public sealed class AgentConfigurationWriterTests : IDisposable
 
     [Fact]
     [SupportedOSPlatform("windows")]
+    public void Save_RestoresPreviousTokenWhenConfigurationCommitFails()
+    {
+        Directory.CreateDirectory(_directory);
+        var configurationPath = Path.Combine(_directory, "appsettings.json");
+        var dataDirectory = Path.Combine(_directory, "data");
+        Directory.CreateDirectory(dataDirectory);
+        var originalConfiguration = "{ \"Agent\": { \"DeviceToken\": \"\" } }";
+        var tokenPath = Path.Combine(dataDirectory, "device-token.dat");
+        File.WriteAllText(configurationPath, originalConfiguration);
+        File.WriteAllText(tokenPath, "previous-protected-token");
+        File.SetAttributes(configurationPath, FileAttributes.ReadOnly);
+        try
+        {
+            var activation = new AgentActivationResult(
+                Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "device-id", "new-token", false);
+
+            Assert.Throws<UnauthorizedAccessException>(() => new AgentConfigurationWriter().Save(
+                configurationPath, dataDirectory, new Uri("https://monitoring.example.kz"), activation));
+
+            Assert.Equal("previous-protected-token", File.ReadAllText(tokenPath));
+            Assert.Equal(originalConfiguration, File.ReadAllText(configurationPath));
+        }
+        finally
+        {
+            File.SetAttributes(configurationPath, FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
     public void LocalAgentSettingsReader_ReadsOnlyProtectedLocalBinding()
     {
         Directory.CreateDirectory(_directory);
@@ -82,7 +113,8 @@ public sealed class AgentConfigurationWriterTests : IDisposable
             Guid.NewGuid(),
             Guid.NewGuid(),
             "local-device",
-            "protected-local-token");
+            "protected-local-token",
+            false);
         new AgentConfigurationWriter().Save(
             configurationPath,
             dataDirectory,

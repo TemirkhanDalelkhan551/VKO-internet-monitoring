@@ -36,6 +36,7 @@ public sealed class ActivationApiClientTests
 
         var result = await new ActivationApiClient(client).CheckAndPreviewAsync(
             "ABCD-EFGH-JKLM",
+            "test-device-id",
             CancellationToken.None);
 
         Assert.Equal(schoolId, result.SchoolId);
@@ -54,6 +55,7 @@ public sealed class ActivationApiClientTests
             {
                 Assert.Equal("/api/devices/activation-preview", request.PathAndQuery);
                 Assert.Contains("ABCD-EFGH-JKLM", request.Body, StringComparison.Ordinal);
+                Assert.Contains("test-device-id", request.Body, StringComparison.Ordinal);
             });
     }
 
@@ -66,6 +68,7 @@ public sealed class ActivationApiClientTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             new ActivationApiClient(client).CheckAndPreviewAsync(
                 "ABCD-EFGH-JKLM",
+                "test-device-id",
                 CancellationToken.None));
 
         Assert.Contains("пока не готов", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -84,6 +87,7 @@ public sealed class ActivationApiClientTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             new ActivationApiClient(client).CheckAndPreviewAsync(
                 "ABCD-EFGH-JKLM",
+                "test-device-id",
                 CancellationToken.None));
 
         Assert.Contains("просрочен", error.Message, StringComparison.OrdinalIgnoreCase);

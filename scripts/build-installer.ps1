@@ -1,3 +1,10 @@
+param(
+    [switch]$Sign,
+    [string]$CertificateThumbprint,
+    [string]$PfxPath,
+    [string]$TimestampServer = 'http://timestamp.digicert.com'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -20,6 +27,12 @@ if (-not $compilerPath) {
     throw 'Inno Setup 6 was not found. Install JRSoftware.InnoSetup with winget.'
 }
 
+if ($Sign) {
+    & (Join-Path $PSScriptRoot 'sign-release.ps1') -Stage Payload `
+        -CertificateThumbprint $CertificateThumbprint -PfxPath $PfxPath `
+        -TimestampServer $TimestampServer
+}
+
 & $compilerPath $definitionPath
 if ($LASTEXITCODE -ne 0) {
     throw "Installer build failed with exit code $LASTEXITCODE."
@@ -31,8 +44,14 @@ $installer = Get-ChildItem `
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
+if ($Sign) {
+    & (Join-Path $PSScriptRoot 'sign-release.ps1') -Stage Installer `
+        -CertificateThumbprint $CertificateThumbprint -PfxPath $PfxPath `
+        -TimestampServer $TimestampServer
+}
+
 $verification = & (Join-Path $PSScriptRoot 'verify-installer.ps1') `
-    -InstallerPath $installer.FullName
+    -InstallerPath $installer.FullName -RequireValidSignature:$Sign -RequireTimestamp:$Sign
 $checksumPath = "$($installer.FullName).sha256"
 "$($verification.Sha256)  $($installer.Name)" | Set-Content `
     -LiteralPath $checksumPath `

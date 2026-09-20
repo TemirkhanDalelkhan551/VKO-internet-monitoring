@@ -247,7 +247,8 @@ public sealed class SetupForm : Form
                 $"Линия: {preview.LineName}\n" +
                 $"Поставщик: {preview.ProviderName ?? "не указан"}\n" +
                 $"Тип линии: {preview.ConnectionType ?? "не указан"}\n" +
-                $"Код действует до: {preview.ExpiresAtUtc.ToLocalTime():dd.MM.yyyy HH:mm}";
+                $"Код действует до: {preview.ExpiresAtUtc.ToLocalTime():dd.MM.yyyy HH:mm}" +
+                (preview.IsRecovery ? "\n\nБудет восстановлена незавершённая активация этого компьютера." : string.Empty);
             confirmationPanel.Visible = true;
             editButton.Visible = true;
             activateButton.Text = "Подтвердить и запустить";
@@ -285,7 +286,7 @@ public sealed class SetupForm : Form
                 : "Служба запущена. Первая связь пока не подтверждена; проверьте локальное состояние через минуту.";
 
             MessageBox.Show(
-                $"Компьютер успешно подключён.\n\n" +
+                (result.Recovered ? "Активация компьютера успешно восстановлена.\n\n" : "Компьютер успешно подключён.\n\n") +
                 $"Устройство: {input.DeviceName}\n" +
                 $"Идентификатор: {result.DeviceId:D}\n\n" +
                 (heartbeatConfirmed
@@ -298,7 +299,7 @@ public sealed class SetupForm : Form
         }
         catch (OperationCanceledException)
         {
-            statusLabel.Text = "Активация отменена. Если код уже был принят сервером, обратитесь к администратору.";
+            statusLabel.Text = "Активация отменена. Повторите её на этом компьютере с тем же кодом в течение 24 часов.";
             statusLabel.ForeColor = MutedColor;
         }
         catch (Exception exception)
@@ -409,7 +410,7 @@ public sealed class SetupForm : Form
         editButton.Visible = false;
         activateButton.Text = "Проверить и продолжить";
         statusLabel.ForeColor = MutedColor;
-        statusLabel.Text = "Измените данные и повторите проверку. Код ещё не использован этим мастером.";
+        statusLabel.Text = "Измените данные и повторите проверку. Если сервер уже принял код, этот компьютер восстановит активацию автоматически.";
         SetBusy(false);
         activationCode.Focus();
     }

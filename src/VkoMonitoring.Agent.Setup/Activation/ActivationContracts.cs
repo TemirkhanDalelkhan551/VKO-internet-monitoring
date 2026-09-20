@@ -1,6 +1,6 @@
 namespace VkoMonitoring.Agent.Setup.Activation;
 
-public sealed record AgentActivationPreviewRequest(string ActivationCode);
+public sealed record AgentActivationPreviewRequest(string ActivationCode, string DeviceIdentifier);
 
 public sealed record AgentActivationPreviewResult(
     Guid SchoolId,
@@ -9,7 +9,8 @@ public sealed record AgentActivationPreviewResult(
     string LineName,
     string? ProviderName,
     string? ConnectionType,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    bool IsRecovery);
 
 public sealed record AgentActivationRequest(
     string ActivationCode,
@@ -23,4 +24,5 @@ public sealed record AgentActivationResult(
     Guid LineId,
     Guid DeviceId,
     string DeviceIdentifier,
-    string DeviceToken);
+    string DeviceToken,
+    bool Recovered);

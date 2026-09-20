@@ -35,7 +35,8 @@ try{
  Check 'issued code activates installer API' ($activated.StatusCode -eq 201)
  $device=$activated.Content|ConvertFrom-Json
  Check 'device belongs to selected school and line' ($device.schoolId -eq $school.schoolId -and $device.lineId -eq $line.lineId -and $device.deviceToken.Length -gt 10)
- Check 'code cannot be reused' ((Post '/api/devices/activate' $activate @{}).StatusCode -eq 401)
+ $otherMachine=$activate.Clone();$otherMachine.deviceIdentifier=[guid]::NewGuid().ToString()
+ Check 'code cannot be reused on another machine' ((Post '/api/devices/activate' $otherMachine @{}).StatusCode -eq 401)
  Check 'used code cannot be previewed' ((Post '/api/devices/activation-preview' @{activationCode=$issued.activationCode} @{}).StatusCode -eq 401)
  $beforeIds=@($registry|ForEach-Object activationCodeId)
  $revocable=(Post '/api/activation-codes' @{schoolId=$school.schoolId;lineId=$line.lineId;lifetimeMinutes=30} $admin).Content|ConvertFrom-Json -DateKind String

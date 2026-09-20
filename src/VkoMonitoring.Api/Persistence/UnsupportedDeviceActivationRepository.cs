@@ -23,6 +23,7 @@ public sealed class UnsupportedDeviceActivationRepository : IDeviceActivationRep
 
     public Task<ActivationCodePreviewResult?> PreviewAsync(
         byte[] codeHash,
+        string? deviceIdentifier,
         CancellationToken cancellationToken) =>
         throw new NotSupportedException("Device activation requires PostgreSQL storage.");
 

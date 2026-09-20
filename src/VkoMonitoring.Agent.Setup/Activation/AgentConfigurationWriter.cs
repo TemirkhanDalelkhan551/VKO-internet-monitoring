@@ -24,14 +24,15 @@ public sealed class AgentConfigurationWriter
             throw new PlatformNotSupportedException("Защита токена DPAPI доступна только в Windows.");
         }
 
-        var root = JsonNode.Parse(File.ReadAllText(configurationPath))?.AsObject()
+        var originalConfiguration = File.ReadAllBytes(configurationPath);
+        var root = JsonNode.Parse(Encoding.UTF8.GetString(originalConfiguration))?.AsObject()
             ?? throw new InvalidOperationException("Файл конфигурации имеет неверный формат JSON.");
         var agent = root["Agent"]?.AsObject()
             ?? throw new InvalidOperationException("В конфигурации отсутствует раздел Agent.");
 
         Directory.CreateDirectory(dataDirectory);
         var tokenPath = Path.Combine(dataDirectory, "device-token.dat");
-        WriteProtectedToken(tokenPath, activation.DeviceToken);
+        var originalToken = File.Exists(tokenPath) ? File.ReadAllBytes(tokenPath) : null;
 
         var normalizedBaseUri = EnsureTrailingSlash(apiBaseUri);
         agent["SchoolId"] = activation.SchoolId;
@@ -47,47 +48,54 @@ public sealed class AgentConfigurationWriter
         setup["DefaultApiBaseUrl"] = normalizedBaseUri.AbsoluteUri;
         root["Setup"] = setup;
 
-        var temporaryPath = configurationPath + $".{Guid.NewGuid():N}.tmp";
+        var configurationTemporaryPath = configurationPath + $".{Guid.NewGuid():N}.tmp";
+        var tokenTemporaryPath = tokenPath + $".{Guid.NewGuid():N}.tmp";
         try
         {
             File.WriteAllText(
-                temporaryPath,
+                configurationTemporaryPath,
                 root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            File.Move(temporaryPath, configurationPath, overwrite: true);
+            File.WriteAllText(
+                tokenTemporaryPath,
+                ProtectToken(activation.DeviceToken),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(tokenTemporaryPath, tokenPath, overwrite: true);
+            File.Move(configurationTemporaryPath, configurationPath, overwrite: true);
+        }
+        catch
+        {
+            RestoreFile(tokenPath, originalToken);
+            RestoreFile(configurationPath, originalConfiguration);
+            throw;
         }
         finally
         {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
+            DeleteIfPresent(configurationTemporaryPath);
+            DeleteIfPresent(tokenTemporaryPath);
         }
     }
 
     [SupportedOSPlatform("windows")]
-    private static void WriteProtectedToken(string path, string token)
+    private static string ProtectToken(string token)
     {
         var protectedBytes = ProtectedData.Protect(
             Encoding.UTF8.GetBytes(token),
             optionalEntropy: null,
             DataProtectionScope.LocalMachine);
-        var temporaryPath = path + $".{Guid.NewGuid():N}.tmp";
-        try
-        {
-            File.WriteAllText(
-                temporaryPath,
-                Convert.ToBase64String(protectedBytes),
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            File.Move(temporaryPath, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
+        return Convert.ToBase64String(protectedBytes);
+    }
+
+    private static void RestoreFile(string path, byte[]? contents)
+    {
+        if (contents is null) DeleteIfPresent(path);
+        else if (!File.Exists(path) || !File.ReadAllBytes(path).AsSpan().SequenceEqual(contents))
+            File.WriteAllBytes(path, contents);
+    }
+
+    private static void DeleteIfPresent(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
     }
 
     private static Uri EnsureTrailingSlash(Uri uri) =>

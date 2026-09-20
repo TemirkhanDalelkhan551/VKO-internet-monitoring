@@ -20,6 +20,7 @@ public interface IDeviceActivationRepository
 
     Task<ActivationCodePreviewResult?> PreviewAsync(
         byte[] codeHash,
+        string? deviceIdentifier,
         CancellationToken cancellationToken);
 
     Task<ActivatedDeviceBinding?> ActivateAsync(

@@ -268,7 +268,7 @@ app.MapGet(
 
 app.MapGet("/api/settings/operations", async (HttpRequest request, IOperationalSettingsRepository repository, CancellationToken cancellationToken) =>
     MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator }
-        ? Results.Forbid()
+        ? Results.StatusCode(StatusCodes.Status403Forbidden)
         : Results.Ok(await repository.GetAsync(cancellationToken)))
     .RequireRateLimiting("admin-read");
 
@@ -278,7 +278,7 @@ app.MapPut("/api/settings/operations", async (
     IOperationalSettingsRepository repository,
     CancellationToken cancellationToken) =>
 {
-    if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator }) return Results.Forbid();
+    if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator }) return Results.StatusCode(StatusCodes.Status403Forbidden);
     try
     {
         if (settings.MeasurementWindows is null || settings.MeasurementWindows.Length is < 1 or > 12 ||
@@ -495,6 +495,70 @@ app.MapPost(
     })
     .RequireRateLimiting("admin-write");
 
+app.MapPut(
+    "/api/devices/{deviceId:guid}/binding",
+    async (Guid deviceId, VkoMonitoring.Api.Models.DeviceRebindRequest binding,
+        HttpRequest request, IDeviceAdministrationRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator })
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        if (!IsValidLifecycleReason(binding.Reason) || binding.SchoolId == Guid.Empty || binding.LineId == Guid.Empty)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["binding"] = ["School, line and a 5-500 character reason are required."] });
+        var access = MonitoringRequestAccess.From(request.HttpContext);
+        var result = await repository.RebindAsync(deviceId, binding.SchoolId, binding.LineId,
+            binding.Reason, access?.Actor ?? "bootstrap-admin", cancellationToken);
+        return result is null
+            ? Results.Conflict(new { error = "Device is not active or the target school/line binding is invalid." })
+            : Results.Ok(result);
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPost(
+    "/api/devices/{deviceId:guid}/replace",
+    async (Guid deviceId, VkoMonitoring.Api.Models.DeviceReplacementRequest replacement,
+        HttpRequest request, IDeviceAdministrationRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator })
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        if (!IsValidLifecycleReason(replacement.Reason) || replacement.ReplacementDeviceId == Guid.Empty)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["replacement"] = ["Replacement device and a 5-500 character reason are required."] });
+        var access = MonitoringRequestAccess.From(request.HttpContext);
+        var result = await repository.ReplaceAsync(deviceId, replacement.ReplacementDeviceId,
+            replacement.Reason, access?.Actor ?? "bootstrap-admin", cancellationToken);
+        return result is null
+            ? Results.Conflict(new { error = "Both devices must be active, different, and belong to the same school." })
+            : Results.Ok(result);
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPost(
+    "/api/devices/{deviceId:guid}/decommission",
+    async (Guid deviceId, VkoMonitoring.Api.Models.DeviceDecommissionRequest retirement,
+        HttpRequest request, IDeviceAdministrationRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator })
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        if (!IsValidLifecycleReason(retirement.Reason))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["A 5-500 character reason is required."] });
+        var access = MonitoringRequestAccess.From(request.HttpContext);
+        var result = await repository.DecommissionAsync(deviceId, retirement.Reason,
+            access?.Actor ?? "bootstrap-admin", cancellationToken);
+        return result is null
+            ? Results.Conflict(new { error = "Device is missing or no longer active." })
+            : Results.Ok(result);
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapGet(
+    "/api/devices/{deviceId:guid}/lifecycle",
+    async (Guid deviceId, IDeviceAdministrationRepository repository,
+        CancellationToken cancellationToken) =>
+        Results.Ok(await repository.GetHistoryAsync(deviceId, cancellationToken)))
+    .RequireRateLimiting("admin-read");
+
 app.MapPost(
     "/api/activation-codes",
     async (
@@ -553,7 +617,7 @@ app.MapGet(
         var user = MonitoringRequestAccess.From(request.HttpContext)?.User;
         if (user is not null && user.Role is not (UserRole.Administrator or UserRole.Regional))
         {
-            return Results.Forbid();
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
         if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
         {
@@ -591,7 +655,8 @@ app.MapPost(
                 statusCode: StatusCodes.Status501NotImplemented);
         }
 
-        if (!ActivationCodeProtector.IsValidFormat(request.ActivationCode))
+        if (!ActivationCodeProtector.IsValidFormat(request.ActivationCode) ||
+            request.DeviceIdentifier?.Length > 200)
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
@@ -601,6 +666,7 @@ app.MapPost(
 
         var preview = await repository.PreviewAsync(
             ActivationCodeProtector.Hash(request.ActivationCode),
+            string.IsNullOrWhiteSpace(request.DeviceIdentifier) ? null : request.DeviceIdentifier.Trim(),
             cancellationToken);
         return preview is null
             ? Results.Json(
@@ -666,7 +732,8 @@ app.MapPost(
                     binding.LineId,
                     binding.DeviceId,
                     binding.DeviceIdentifier,
-                    deviceToken));
+                    deviceToken,
+                    binding.Recovered));
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {
@@ -1177,3 +1244,6 @@ static async Task<IResult> CheckReadinessAsync(
         : StatusCodes.Status200OK;
     return Results.Json(report, statusCode: statusCode);
 }
+
+static bool IsValidLifecycleReason(string? reason) =>
+    !string.IsNullOrWhiteSpace(reason) && reason.Trim().Length is >= 5 and <= 500;

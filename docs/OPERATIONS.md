@@ -1,6 +1,6 @@
 # Быстрые эксплуатационные процедуры
 
-Дата актуализации: 19.09.2026. Команды выполняются из корня проекта в PowerShell.
+Дата актуализации: 20.09.2026. Команды выполняются из корня проекта в PowerShell.
 
 ## Автоматическая проверка изменений
 
@@ -14,17 +14,47 @@ Workflow `.github/workflows/ci.yml` запускается для каждого
 
 ```powershell
 .\scripts\verify-installer.ps1 `
-  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.3.0-win-x64.exe
+  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.4.0-win-x64.exe
 ```
 
-После получения сертификата используйте `-RequireValidSignature`, чтобы неподписанная сборка завершала проверку ошибкой.
+## Подпись релиза и timestamp
+
+Скрипт `scripts/sign-release.ps1` подписывает собственные `VkoMonitoring.Agent.exe`, `VkoMonitoring.Agent.Setup.exe` и итоговый установщик SHA-256 и требует наличие timestamp. Сертификат выбирается по thumbprint из хранилища Windows либо загружается из PFX вне репозитория. Пароль PFX читается только из переменной среды `VKO_CODE_SIGNING_PFX_PASSWORD`.
+
+С сертификатом в хранилище Windows:
+
+```powershell
+.\scripts\build-installer.ps1 -Sign `
+  -CertificateThumbprint 'THUMBPRINT_БЕЗ_ПРОБЕЛОВ'
+```
+
+С PFX вне каталога проекта:
+
+```powershell
+$env:VKO_CODE_SIGNING_PFX_PASSWORD = Read-Host -AsSecureString |
+  ConvertFrom-SecureString -AsPlainText
+.\scripts\build-installer.ps1 -Sign `
+  -PfxPath 'D:\secure\vko-code-signing.pfx' `
+  -TimestampServer 'http://timestamp.digicert.com'
+Remove-Item Env:\VKO_CODE_SIGNING_PFX_PASSWORD
+```
+
+Сборка сначала подписывает исполняемые файлы полезной нагрузки, затем создаёт Inno Setup и подписывает установщик. Финальная проверка должна требовать и доверенную подпись, и timestamp:
+
+```powershell
+.\scripts\verify-installer.ps1 `
+  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.4.0-win-x64.exe `
+  -RequireValidSignature -RequireTimestamp
+```
+
+PFX, пароль и закрытый ключ не сохраняются в Git, логах или артефактах. Текущий локальный установщик 1.4.0 собран без подписи, потому что доверенный сертификат ещё не предоставлен.
 
 ## Тихое обновление установленного агента
 
 Текущий Inno Setup поддерживает тихий режим. Для уже активированного компьютера обновление сохраняет конфигурацию и DPAPI-токен:
 
 ```powershell
-.\VkoInternetMonitoringAgent-Setup-1.3.0-win-x64.exe `
+.\VkoInternetMonitoringAgent-Setup-1.4.0-win-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LOG="$env:TEMP\vko-agent-install.log"
 ```
@@ -83,3 +113,17 @@ ZIP содержит версию Windows и агента, состояние с
 2. Установите масштаб браузера 200%; текст и кнопки не должны перекрываться, таблицы должны прокручиваться внутри своих контейнеров.
 3. Проверьте, что у полей есть читаемые названия, ошибки не передаются только цветом, а динамические сообщения озвучиваются через `role="alert"` или `aria-live`.
 4. Повторите основные действия с NVDA. Полное закрытие пункта требует зафиксированных результатов по пяти ролям.
+
+## Приёмка пяти ролей на Render
+
+Рабочие пароли не записываются в репозиторий и не выводятся сценарием. Перед read-only приёмкой задайте десять переменных среды для ролей `ADMINISTRATOR`, `REGIONAL`, `DISTRICT`, `SCHOOL`, `PROVIDER`, например:
+
+```powershell
+$env:VKO_RENDER_ADMINISTRATOR_LOGIN = '...'
+$env:VKO_RENDER_ADMINISTRATOR_PASSWORD = '...'
+# Аналогично VKO_RENDER_REGIONAL_*, VKO_RENDER_DISTRICT_*,
+# VKO_RENDER_SCHOOL_* и VKO_RENDER_PROVIDER_*.
+.\scripts\verify-render-roles.ps1
+```
+
+Сценарий проверяет readiness, вход, фактическую роль, доступную область школ и инцидентов, а также ожидаемые `200/403` для пользователей, аудита и настроек. Он не изменяет рабочие данные и завершает каждую сессию выходом. После выполнения удалите переменные из процесса PowerShell.

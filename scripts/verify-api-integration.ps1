@@ -57,8 +57,14 @@ try {
  $activation=Req POST '/api/activation-codes' @{schoolId=$binding.schoolId;lineId=$binding.lineId;lifetimeMinutes=5} $admin
  Check 'create_activation_code' ($activation.code -eq 201)
  $ab=@{activationCode=$activation.data.activationCode;deviceName='Activation test';deviceIdentifier=[guid]::NewGuid().ToString();connectionType='Ethernet'}
- Check 'activate_once' ((Req POST '/api/devices/activate' $ab).code -eq 201)
- Check 'activation_replay_rejected' ((Req POST '/api/devices/activate' $ab).code -eq 401)
+ $activated=Req POST '/api/devices/activate' $ab
+ Check 'activate_once' ($activated.code -eq 201 -and -not $activated.data.recovered)
+ $recoveryPreview=Req POST '/api/devices/activation-preview' @{activationCode=$ab.activationCode;deviceIdentifier=$ab.deviceIdentifier}
+ Check 'activation_recovery_preview' ($recoveryPreview.code -eq 200 -and $recoveryPreview.data.isRecovery)
+ $recovered=Req POST '/api/devices/activate' $ab
+ Check 'activation_recovery_same_machine' ($recovered.code -eq 201 -and $recovered.data.recovered -and $recovered.data.deviceId -eq $activated.data.deviceId -and $recovered.data.deviceToken -ne $activated.data.deviceToken)
+ $foreignRecovery=$ab.Clone();$foreignRecovery.deviceIdentifier=[guid]::NewGuid().ToString()
+ Check 'activation_recovery_foreign_machine_rejected' ((Req POST '/api/devices/activate' $foreignRecovery).code -eq 401)
  $start=[DateTimeOffset]::UtcNow.AddMinutes(-10)
  function New-TestMeasurement($offset,$download=50,$state='Online') {
   @{eventId=[guid]::NewGuid().ToString();schoolId=$binding.schoolId;deviceId=$binding.deviceId;lineId=$binding.lineId;measuredAtUtc=$start.AddSeconds($offset).ToString('o');downloadMbps=$download;uploadMbps=50;pingMilliseconds=20;jitterMilliseconds=1;packetLossPercent=0;connectionStatus=$state;agentVersion='verification';durationMilliseconds=1000;networkConnectionType='Ethernet';externalIpAddress='198.51.100.99'}
@@ -118,6 +124,20 @@ try {
  Check 'old_queue_measurement_accepted' ((Req POST '/api/measurements' $old $dh).code -eq 201)
  $backup=Req POST '/api/devices/register' @{schoolId=$binding.schoolId;schoolName='Line status regression';lineId=[guid]::NewGuid().ToString();lineName='Reserve';providerName='Backup provider';lineStatus='Backup';deviceName='Backup device';deviceIdentifier=[guid]::NewGuid().ToString()} $admin
  Check 'backup_registration' ($backup.code -eq 201)
+ $lifecycleOld=Req POST '/api/devices/register' @{schoolName='Lifecycle verification';districtCity='Lifecycle';lineName='Lifecycle main';providerName='Lifecycle ISP';lineStatus='Primary';deviceName='Lifecycle old';deviceIdentifier=[guid]::NewGuid().ToString()} $admin
+ $lifecycleNew=Req POST '/api/devices/register' @{schoolId=$lifecycleOld.data.schoolId;schoolName='Lifecycle verification';lineId=$lifecycleOld.data.lineId;lineName='Lifecycle main';providerName='Lifecycle ISP';lineStatus='Primary';deviceName='Lifecycle new';deviceIdentifier=[guid]::NewGuid().ToString()} $admin
+ $lifecycleReserve=Req POST '/api/devices/register' @{schoolId=$lifecycleOld.data.schoolId;schoolName='Lifecycle verification';lineId=[guid]::NewGuid().ToString();lineName='Lifecycle reserve';providerName='Lifecycle ISP';lineStatus='Backup';deviceName='Lifecycle reserve seed';deviceIdentifier=[guid]::NewGuid().ToString()} $admin
+ $rebound=Req PUT "/api/devices/$($lifecycleOld.data.deviceId)/binding" @{schoolId=$lifecycleOld.data.schoolId;lineId=$lifecycleReserve.data.lineId;reason='Moved to reserve line'} $admin
+ Check 'device_rebind' ($rebound.code -eq 200 -and $rebound.data.lineId -eq $lifecycleReserve.data.lineId)
+ $replaced=Req POST "/api/devices/$($lifecycleOld.data.deviceId)/replace" @{replacementDeviceId=$lifecycleNew.data.deviceId;reason='Planned workstation replacement'} $admin
+ Check 'device_replace' ($replaced.code -eq 200 -and $replaced.data.lifecycleStatus -eq 'Replaced' -and $replaced.data.replacedByDeviceId -eq $lifecycleNew.data.deviceId)
+ $oldLifecycleHeaders=@{'X-Device-Token'=$lifecycleOld.data.deviceToken}
+ $oldLifecycleHeartbeat=@{schoolId=$lifecycleOld.data.schoolId;deviceId=$lifecycleOld.data.deviceId;lineId=$lifecycleReserve.data.lineId;sentAtUtc=[DateTimeOffset]::UtcNow.ToString('o');agentVersion='verification'}
+ Check 'replaced_device_token_revoked' ((Req POST '/api/devices/heartbeat' $oldLifecycleHeartbeat $oldLifecycleHeaders).code -eq 401)
+ $decommissioned=Req POST "/api/devices/$($lifecycleNew.data.deviceId)/decommission" @{reason='Device removed from service'} $admin
+ Check 'device_decommission' ($decommissioned.code -eq 200 -and $decommissioned.data.lifecycleStatus -eq 'Decommissioned')
+ $lifecycleHistory=Req GET "/api/devices/$($lifecycleOld.data.deviceId)/lifecycle" $null $admin
+ Check 'device_lifecycle_history' ($lifecycleHistory.code -eq 200 -and @($lifecycleHistory.data).Count -eq 2)
  $binding=$backup.data;$dh=@{'X-Device-Token'=$binding.deviceToken}
  $fresh=New-TestMeasurement 0;$fresh.measuredAtUtc=[DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
  Check 'backup_measurement' ((Req POST '/api/measurements' $fresh $dh).code -eq 201)
@@ -183,7 +203,9 @@ try {
  foreach($key in @('school-user','district-user','regional-user','provider-user')) {
   Check ("users_denied_"+$key) ((Req GET '/api/users' $null $users[$key].headers).code -eq 403)
   Check ("audit_denied_"+$key) ((Req GET '/api/audit' $null $users[$key].headers).code -eq 403)
+  Check ("settings_denied_"+$key) ((Req GET '/api/settings/operations' $null $users[$key].headers).code -eq 403)
  }
+ Check 'regional_lifecycle_write_denied' ((Req POST ("/api/devices/"+[guid]::NewGuid().ToString()+"/decommission") @{reason='Permission verification'} $users['regional-user'].headers).code -eq 403)
  $providerSchool=(Req GET "/api/schools/$($mainBinding.schoolId)" $null $providerHeaders).data
  Check 'provider_only_own_line' (@($providerSchool.lines).Count -eq 1 -and $providerSchool.lines[0].providerName -eq 'Backup provider')
  Check 'provider_no_other_line_summary' ($null -eq $providerSchool.primaryLineId -and $null -eq $providerSchool.latestMeasurement -and $null -eq $providerSchool.providerName)

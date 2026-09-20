@@ -69,6 +69,10 @@ public sealed record DeviceOverview(
     public MonitoringStatus QualityStatus { get; init; }
     public MeasurementFreshness MeasurementFreshness { get; init; }
     public AgentPresence AgentPresence { get; init; }
+    public string LifecycleStatus { get; init; } = "Active";
+    public Guid? ReplacedByDeviceId { get; init; }
+    public DateTimeOffset? RetiredAtUtc { get; init; }
+    public string? RetirementReason { get; init; }
 }
 
 public sealed record LineOverview(

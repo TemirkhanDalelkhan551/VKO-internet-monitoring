@@ -7,6 +7,7 @@ public sealed class ActivationApiClient(HttpClient httpClient)
 {
     public async Task<AgentActivationPreviewResult> CheckAndPreviewAsync(
         string activationCode,
+        string deviceIdentifier,
         CancellationToken cancellationToken)
     {
         try
@@ -22,12 +23,12 @@ public sealed class ActivationApiClient(HttpClient httpClient)
             await CheckMeasurementEndpointsAsync(cancellationToken);
             using var response = await httpClient.PostAsJsonAsync(
                 "api/devices/activation-preview",
-                new AgentActivationPreviewRequest(activationCode),
+                new AgentActivationPreviewRequest(activationCode, deviceIdentifier),
                 cancellationToken);
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 throw new InvalidOperationException(
-                    "Код активации неверен, просрочен или уже использован. Получите новый код в веб-панели.");
+                    "Код активации неверен, просрочен или принадлежит другому компьютеру. Для восстановления повторите активацию на исходном компьютере в течение 24 часов либо получите новый код.");
             }
 
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
@@ -82,7 +83,7 @@ public sealed class ActivationApiClient(HttpClient httpClient)
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             throw new InvalidOperationException(
-                "Код активации истёк или уже использован после проверки. Получите новый код и повторите.");
+                "Код активации истёк, отозван или принадлежит другому компьютеру. Повторите на исходном компьютере либо получите новый код.");
         }
 
         if (response.StatusCode == HttpStatusCode.Conflict)

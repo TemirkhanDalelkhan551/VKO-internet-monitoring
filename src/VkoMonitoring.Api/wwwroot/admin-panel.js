@@ -99,24 +99,63 @@ export function createAdminPanel({ element, request, getSession, onUnauthorized 
   });
 
   const deviceFeedback = element("p", "section-note"); deviceFeedback.setAttribute("role", "status"); const deviceList = element("div", "table-scroll");
-  devicesPanel.append(element("h3", "", "Реестр устройств"), element("p", "section-note", "Новый токен показывается один раз. После ротации его нужно безопасно установить на соответствующий компьютер; старый токен сразу перестаёт работать."), deviceFeedback, deviceList);
+  let availableDevices = [], lifecycleDevice = null;
+  const lifecycleDialog = element("dialog", "admin-dialog"), lifecycleForm = element("form", "admin-form"); lifecycleForm.method = "dialog";
+  const lifecycleTitle = element("h3", "", "Жизненный цикл устройства"), lifecycleAction = element("select"), lifecycleSchool = element("select"), lifecycleLine = element("select"), lifecycleReplacement = element("select"), lifecycleReason = element("textarea"), lifecycleHistory = element("div", "section-note");
+  for (const [value, text] of [["rebind", "Перепривязать к линии"], ["replace", "Заменить другим устройством"], ["decommission", "Вывести из эксплуатации"]]) lifecycleAction.append(new Option(text, value));
+  lifecycleReason.required = true; lifecycleReason.minLength = 5; lifecycleReason.maxLength = 500; lifecycleReason.rows = 3;
+  const lifecycleSubmit = element("button", "button primary", "Подтвердить действие"), lifecycleCancel = element("button", "button secondary", "Отмена"); lifecycleSubmit.type = "submit"; lifecycleCancel.type = "button"; lifecycleCancel.addEventListener("click", () => lifecycleDialog.close());
+  lifecycleForm.append(label("Действие", lifecycleAction), label("Новая школа", lifecycleSchool), label("Новая линия", lifecycleLine), label("Новое устройство", lifecycleReplacement), label("Причина", lifecycleReason), lifecycleSubmit, lifecycleCancel);
+  lifecycleDialog.append(lifecycleTitle, element("p", "section-note", "История измерений сохраняется. Вывод и замена сразу блокируют старый токен."), lifecycleForm, lifecycleHistory);
+  devicesPanel.append(element("h3", "", "Реестр устройств"), element("p", "section-note", "Новый токен показывается один раз. После ротации его нужно безопасно установить на соответствующий компьютер; старый токен сразу перестаёт работать."), deviceFeedback, deviceList, lifecycleDialog);
   async function loadDevices() {
     const session = getSession(), current = generation; deviceFeedback.textContent = "Загрузка устройств…";
     try {
       const groups = await Promise.all(schools.map(async currentSchool => ({ school: currentSchool, devices: await request(`/api/schools/${currentSchool.schoolId}/devices`, { token: session.token }) })));
-      if (current !== generation) return; const table = element("table"), head = element("thead"), body = element("tbody"), header = element("tr");
+      if (current !== generation) return; availableDevices = groups.flatMap(group => group.devices.map(device => ({ ...device, schoolId: group.school.schoolId, schoolName: group.school.name }))); const table = element("table"), head = element("thead"), body = element("tbody"), header = element("tr");
       for (const text of ["Школа", "Компьютер", "Линия", "Последняя связь", "Версия", "Статус", "Действия"]) { const th = element("th", "", text); th.scope = "col"; header.append(th); } head.append(header);
       for (const group of groups) for (const device of group.devices) {
         const tr = element("tr"); const line = group.school.lines.find(item => item.lineId === device.lineId);
-        for (const text of [group.school.name, `${device.name}${device.room ? ` · ${device.room}` : ""}`, line?.name || device.lineId, timestamp(device.lastSeenAtUtc), device.agentVersion || "—", device.isBlocked ? "Заблокирован" : "Активен"]) tr.append(element("td", "", text));
-        const actions = element("td"), block = element("button", "text-button", device.isBlocked ? "Разблокировать" : "Заблокировать"), rotate = element("button", "text-button", "Сменить токен"); block.type = rotate.type = "button";
+        const lifecycle = device.lifecycleStatus || "Active", status = lifecycle === "Active" ? (device.isBlocked ? "Заблокирован" : "Активен") : lifecycle === "Replaced" ? "Заменён" : "Списан";
+        for (const text of [group.school.name, `${device.name}${device.room ? ` · ${device.room}` : ""}`, line?.name || device.lineId, timestamp(device.lastSeenAtUtc), device.agentVersion || "—", status]) tr.append(element("td", "", text));
+        const actions = element("td"), block = element("button", "text-button", device.isBlocked ? "Разблокировать" : "Заблокировать"), rotate = element("button", "text-button", "Сменить токен"), lifecycleButton = element("button", "text-button", "Жизненный цикл"); block.type = rotate.type = lifecycleButton.type = "button";
+        block.disabled = rotate.disabled = lifecycle !== "Active";
         block.addEventListener("click", async () => mutateDevice(device, `/api/devices/${device.deviceId}/block-state`, { isBlocked: !device.isBlocked }, device.isBlocked ? "Устройство разблокировано." : "Устройство заблокировано."));
         rotate.addEventListener("click", async () => { if (!confirm(`Сменить токен устройства «${device.name}»? Старый токен перестанет работать.`)) return; const result = await mutateDevice(device, `/api/devices/${device.deviceId}/token/rotate`, {}, "Токен изменён.", true); if (result?.deviceToken) showOneTimeToken(result.deviceToken, device.name); });
-        actions.append(block, rotate); tr.append(actions); body.append(tr);
+        lifecycleButton.addEventListener("click", () => openLifecycle(device, group.school));
+        actions.append(block, rotate, lifecycleButton); tr.append(actions); body.append(tr);
       }
       table.append(element("caption", "visually-hidden", "Зарегистрированные устройства"), head, body); deviceList.replaceChildren(table); deviceFeedback.textContent = `Устройств: ${groups.reduce((sum, group) => sum + group.devices.length, 0)}.`;
     } catch (error) { if (error.status === 401) onUnauthorized(); else deviceFeedback.textContent = "Не удалось загрузить устройства."; }
   }
+  function updateLifecycleControls() {
+    const action = lifecycleAction.value, rebind = action === "rebind", replace = action === "replace";
+    lifecycleSchool.closest("label").hidden = lifecycleLine.closest("label").hidden = !rebind; lifecycleReplacement.closest("label").hidden = !replace;
+    lifecycleSchool.required = lifecycleLine.required = rebind; lifecycleReplacement.required = replace;
+  }
+  function updateLifecycleLines() {
+    const selected = schools.find(item => item.schoolId === lifecycleSchool.value); lifecycleLine.replaceChildren(new Option("Выберите линию", ""), ...(selected?.lines || []).map(item => new Option(item.name, item.lineId)));
+  }
+  async function openLifecycle(device, currentSchool) {
+    lifecycleDevice = device; lifecycleTitle.textContent = `Жизненный цикл: ${device.name}`; lifecycleAction.value = "rebind"; lifecycleReason.value = "";
+    lifecycleSchool.replaceChildren(...schools.map(item => new Option(item.name, item.schoolId))); lifecycleSchool.value = currentSchool.schoolId; updateLifecycleLines(); lifecycleLine.value = device.lineId;
+    lifecycleReplacement.replaceChildren(new Option("Выберите новое устройство", ""), ...availableDevices.filter(item => item.deviceId !== device.deviceId && item.schoolId === currentSchool.schoolId && (item.lifecycleStatus || "Active") === "Active").map(item => new Option(`${item.name} · ${item.deviceId}`, item.deviceId)));
+    updateLifecycleControls(); lifecycleHistory.textContent = "Загрузка истории…"; lifecycleDialog.showModal();
+    try { const rows = await request(`/api/devices/${device.deviceId}/lifecycle`, { token: getSession().token }); lifecycleHistory.textContent = rows.length ? rows.map(row => `${timestamp(row.occurredAtUtc)} · ${row.action} · ${row.reason} · ${row.actor}`).join("\n") : "Изменений жизненного цикла ещё нет."; }
+    catch { lifecycleHistory.textContent = "Не удалось загрузить историю."; }
+  }
+  lifecycleAction.addEventListener("change", updateLifecycleControls); lifecycleSchool.addEventListener("change", updateLifecycleLines);
+  lifecycleForm.addEventListener("submit", async event => {
+    event.preventDefault(); if (!lifecycleDevice) return; const action = lifecycleAction.value, reason = lifecycleReason.value.trim(); let path, method, body;
+    if (action === "rebind") { path = `/api/devices/${lifecycleDevice.deviceId}/binding`; method = "PUT"; body = { schoolId: lifecycleSchool.value, lineId: lifecycleLine.value, reason }; }
+    else if (action === "replace") { path = `/api/devices/${lifecycleDevice.deviceId}/replace`; method = "POST"; body = { replacementDeviceId: lifecycleReplacement.value, reason }; }
+    else { path = `/api/devices/${lifecycleDevice.deviceId}/decommission`; method = "POST"; body = { reason }; }
+    if (!confirm("Подтвердить изменение жизненного цикла устройства?")) return;
+    lifecycleSubmit.disabled = true;
+    try { await request(path, { method, token: getSession().token, body }); lifecycleDialog.close(); deviceFeedback.textContent = "Жизненный цикл устройства обновлён; история измерений сохранена."; await loadDevices(); }
+    catch (error) { if (error.status === 401) onUnauthorized(); else lifecycleHistory.textContent = error.detail || error.message || "Не удалось изменить устройство."; }
+    finally { lifecycleSubmit.disabled = false; }
+  });
   async function mutateDevice(device, path, body, success, returnsValue = false) {
     const session = getSession(); try { const result = await request(path, { method: returnsValue ? "POST" : "PUT", token: session.token, body }); deviceFeedback.textContent = success; if (!returnsValue) await loadDevices(); return result; }
     catch (error) { if (error.status === 401) onUnauthorized(); else deviceFeedback.textContent = error.detail || "Не удалось изменить устройство."; return null; }

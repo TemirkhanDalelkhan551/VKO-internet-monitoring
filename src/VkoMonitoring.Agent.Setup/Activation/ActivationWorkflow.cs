@@ -16,9 +16,11 @@ public sealed class ActivationWorkflow(
     {
         ArgumentNullException.ThrowIfNull(input);
         PrepareLocalSystem();
+        var deviceIdentifier = identityProvider.GetOrCreate(paths.DataDirectory);
         using var httpClient = CreateHttpClient(input.ServerAddress, TimeSpan.FromSeconds(75));
         return await new ActivationApiClient(httpClient).CheckAndPreviewAsync(
             input.ActivationCode,
+            deviceIdentifier,
             cancellationToken);
     }
 
