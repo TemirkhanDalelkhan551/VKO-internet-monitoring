@@ -1,6 +1,6 @@
 # Веб-панель мониторинга
 
-Состояние: 19.09.2026. Интерфейс обслуживается самим API из wwwroot, без отдельного сервера и npm-сборки. Публичный адрес: https://vko-internet-monitoring-api.onrender.com/ . Точные границы исходников и деплоя: [PROJECT_SNAPSHOT.md](PROJECT_SNAPSHOT.md).
+Состояние: 20.09.2026. Интерфейс обслуживается самим API из wwwroot, без отдельного сервера и npm-сборки. Публичный адрес: https://vko-internet-monitoring-api.onrender.com/ . Точные границы исходников и деплоя: [PROJECT_SNAPSHOT.md](PROJECT_SNAPSHOT.md).
 
 ## Реализованные экраны
 
