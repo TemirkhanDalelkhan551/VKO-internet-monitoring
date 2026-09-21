@@ -1,4 +1,4 @@
-import { roles, statuses, presenceLabels, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, schoolMeasurementDescription, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
+import { roles, statuses, presenceLabels, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, measurementAge, schoolMeasurementDescription, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
 import { createSchoolPanel } from "./school-panel.js";
 import { createOverviewTools } from "./overview-tools.js";
 import { createSchoolMap } from "./school-map.js";
@@ -112,9 +112,12 @@ function badge(status) {
 function statusCell(item) {
   const cell = element("td");
   cell.append(badge(item.status));
-  if (item.measurementFreshness === "Stale") cell.append(element("span", "secondary-text", "Последнее качество: " + (statuses[item.qualityStatus] || statuses.Unknown)[0]));
+  const freshness = item.measurementFreshness || "Missing";
+  cell.append(element("span", `freshness ${freshness.toLowerCase()}`, freshnessDescription(item)));
+  cell.append(element("span", "secondary-text", `Последний замер: ${measurementAge(item.latestMeasurement?.measuredAtUtc)}`));
+  if (freshness === "Stale") cell.append(element("span", "secondary-text", "Последнее качество: " + (statuses[item.qualityStatus] || statuses.Unknown)[0]));
   const primaryUnavailable = "primaryLineId" in item && !item.primaryLineId;
-  cell.append(element("span", `presence ${!primaryUnavailable && item.agentPresence === "Active" ? "active" : ""}`,
+  cell.append(element("span", `presence ${!primaryUnavailable ? (item.agentPresence || "NotSeen").toLowerCase() : "notseen"}`,
     primaryUnavailable ? "Нет данных основной линии" : presenceLabels[item.agentPresence] || "Связь с агентом неизвестна"));
   return cell;
 }
@@ -137,8 +140,8 @@ function lineCard(line) {
     const group = element("div"); group.append(element("dt", "", label), element("dd", "", `${metric(value)} ${unit}`)); metrics.append(group);
   }
   const foot = element("div", "line-foot");
-  foot.append(element("span", "", `${freshnessDescription(line)} · ${timestamp(snapshot?.measuredAtUtc)}`),
-    element("span", "", presenceLabels[line.agentPresence] || "Связь с агентом неизвестна"),
+  foot.append(element("span", `freshness ${String(line.measurementFreshness || "Missing").toLowerCase()}`, `${freshnessDescription(line)} · последний замер ${measurementAge(snapshot?.measuredAtUtc)}`),
+    element("span", `presence ${(line.agentPresence || "NotSeen").toLowerCase()}`, presenceLabels[line.agentPresence] || "Связь с агентом неизвестна"),
     element("span", "", `Устройств на связи: ${line.activeDeviceCount} из ${line.deviceCount}`));
   if (line.measurementFreshness === "Stale") foot.append(element("span", "", "Последнее качество: " + (statuses[line.qualityStatus] || statuses.Unknown)[0]));
   if (line.contractedDownloadMbps !== null || line.contractedUploadMbps !== null) foot.append(element("span", "", `Договор: ↓ ${metric(line.contractedDownloadMbps)} / ↑ ${metric(line.contractedUploadMbps)} Мбит/с`));

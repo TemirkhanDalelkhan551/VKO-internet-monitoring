@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterSchools, summarize, metric, freshnessDescription, schoolMeasurementDescription, timestamp, accessDescription } from "../../src/VkoMonitoring.Api/wwwroot/dashboard-model.js";
+import { filterSchools, summarize, metric, freshnessDescription, measurementAge, schoolMeasurementDescription, timestamp, accessDescription } from "../../src/VkoMonitoring.Api/wwwroot/dashboard-model.js";
 
 const primary = { providerName: "Main provider", lineStatus: "Primary", status: "Unknown", qualityStatus: "Normal", measurementFreshness: "Stale" };
 const backup = { providerName: "Reserve provider", lineStatus: "Backup", status: "NoConnection", measurementFreshness: "Fresh" };
@@ -34,6 +34,10 @@ test("empty scope yields empty list and zero summary", () => {
 });
 test("invalid timestamp never appears as Invalid Date", () => {
   assert.equal(timestamp(null), "—"); assert.equal(timestamp("broken"), "—");
+});
+test("measurement age gives a direct, human-readable freshness cue", () => {
+  assert.equal(measurementAge("2026-09-21T10:00:00Z", Date.parse("2026-09-21T10:03:00Z")), "3 мин назад");
+  assert.equal(measurementAge(null, Date.now()), "замеров ещё нет");
 });
 test("provider and district see their own scope label", () => {
   assert.equal(accessDescription({ role: "Provider", providerName: "Own provider" }), "Own provider");

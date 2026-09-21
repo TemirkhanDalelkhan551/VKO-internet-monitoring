@@ -20,7 +20,7 @@ export function createRatingPanel({ element, request, getSession, onUnauthorized
     for (const row of rows) {
       const tr = document.createElement("tr"), metrics = Object.fromEntries((row.metrics || []).map(metric => [metric.name, metric]));
       const item = row.lineName ? `${row.schoolName} · ${row.lineName}` : row.schoolName;
-      tr.append(cell(String(row.rank)), cell(item, row.category), cell(row.score === null ? "Нет данных" : `${number(row.score)} / 100`, row.category),
+      tr.append(cell(row.rank === null ? "—" : String(row.rank)), cell(item, row.category), cell(row.score === null ? "Недостаточно данных" : `${number(row.score)} / 100`, row.category),
         cell(row.problemMeasurementPercent === null ? "—" : `${number(row.problemMeasurementPercent)}% (${row.problemMeasurementCount}/${row.measurementCount})`),
         cell(`↓ ${number(metrics.Download?.value)} Мбит/с · ↑ ${number(metrics.Upload?.value)} Мбит/с\nPing ${number(metrics.Ping?.value)} мс · Jitter ${number(metrics.Jitter?.value)} мс · Loss ${number(metrics["Packet Loss"]?.value)}%`),
         cell(`${row.freshness === "Fresh" ? "Свежие" : row.freshness === "Stale" ? "Устарели" : "Нет данных"}\nИнцидентов: ${row.incidentCount}`));
@@ -46,6 +46,6 @@ export function createRatingPanel({ element, request, getSession, onUnauthorized
     } finally { if (current === generation) apply.disabled = false; }
   }
   form.addEventListener("submit", event => { event.preventDefault(); refresh(); });
-  host.append(element("h2", "", "Прозрачный рейтинг качества"), element("p", "section-note", "Индекс строится по измерениям и инцидентам за выбранный период. Больший индекс — стабильнее связь."), form, feedback, formula, schools, lines);
+  host.append(element("h2", "", "Прозрачный рейтинг качества"), element("p", "section-note", "Индекс строится по измерениям и инцидентам за выбранный период. Объекты без полного замера помечаются «Недостаточно данных» и не получают место. Больший индекс — стабильнее связь."), form, feedback, formula, schools, lines);
   return { open() { host.hidden = false; host.focus(); refresh(); }, clear() { generation++; controller?.abort(); host.hidden = true; schools.replaceChildren(); lines.replaceChildren(); } };
 }

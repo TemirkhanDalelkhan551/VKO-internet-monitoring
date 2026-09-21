@@ -3,7 +3,7 @@ namespace VkoMonitoring.Api.Models;
 public sealed record RatingMetric(string Name, double? Value, string Unit, double Weight, double Penalty);
 
 public sealed record RatingItem(
-    int Rank,
+    int? Rank,
     Guid SchoolId,
     string SchoolName,
     Guid? LineId,

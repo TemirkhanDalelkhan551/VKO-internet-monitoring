@@ -33,7 +33,12 @@ public sealed class RatingService(
         IEnumerable<MeasurementReportRow> source, int incidentCount, MeasurementFreshness freshness, OperationalSettings thresholds)
     {
         var rows = source.ToArray();
-        if (rows.Length == 0) return new RatingItem(0, schoolId, schoolName, lineId, lineName, null, "Нет данных", 0, 0, null, incidentCount, freshness, []);
+        if (!HasSufficientData(rows))
+        {
+            return new RatingItem(null, schoolId, schoolName, lineId, lineName, null,
+                "Недостаточно данных", rows.Length, rows.Count(row => row.IsProblem), null,
+                incidentCount, freshness, []);
+        }
         var problemPercent = rows.Count(row => row.IsProblem) * 100d / rows.Length;
         var metrics = new List<RatingMetric>
         {
@@ -52,9 +57,22 @@ public sealed class RatingService(
             rows.Length, rows.Count(row => row.IsProblem), Math.Round(problemPercent, 1), incidentCount, freshness, metrics);
     }
 
-    private static IReadOnlyList<RatingItem> Rank(IEnumerable<RatingItem> items) => items.OrderByDescending(item => item.Score ?? -1)
-        .ThenBy(item => item.SchoolName, StringComparer.Ordinal).ThenBy(item => item.LineName, StringComparer.Ordinal)
-        .Select((item, index) => item with { Rank = index + 1 }).ToArray();
+    private static bool HasSufficientData(IEnumerable<MeasurementReportRow> rows) => rows.Any(row =>
+        row.DownloadMbps is not null && row.UploadMbps is not null && row.PingMilliseconds is not null &&
+        row.JitterMilliseconds is not null && row.PacketLossPercent is not null);
+
+    private static IReadOnlyList<RatingItem> Rank(IEnumerable<RatingItem> items)
+    {
+        var materialized = items.ToArray();
+        var ranked = materialized.Where(item => item.Score is not null)
+            .OrderByDescending(item => item.Score)
+            .ThenBy(item => item.SchoolName, StringComparer.Ordinal).ThenBy(item => item.LineName, StringComparer.Ordinal)
+            .Select((item, index) => item with { Rank = index + 1 });
+        var insufficient = materialized.Where(item => item.Score is null)
+            .OrderBy(item => item.SchoolName, StringComparer.Ordinal).ThenBy(item => item.LineName, StringComparer.Ordinal)
+            .Select(item => item with { Rank = null });
+        return ranked.Concat(insufficient).ToArray();
+    }
     private static double? Average(IEnumerable<double?> values) { var numbers = values.OfType<double>().ToArray(); return numbers.Length == 0 ? null : Math.Round(numbers.Average(), 2); }
     private static RatingMetric LowerIsBetter(string name, double? value, double target, string unit, double weight) =>
         new(name, value, unit, weight, value is null ? weight : weight * Math.Clamp((target - value.Value) / target, 0, 1));
@@ -66,6 +84,7 @@ public sealed class RatingService(
         new("Проблемные замеры", "35 × доля проблемных замеров.", 35),
         new("Download / Upload", "Штраф пропорционален дефициту относительно порога.", 25),
         new("Ping / Jitter / Packet Loss", "Штраф пропорционален превышению порога.", 20),
+        new("Достаточность данных", "Без хотя бы одного полного замера объект не получает индекс и место в рейтинге.", 0),
         new("Свежесть", "Свежие: 0; устаревшие: 5; отсутствуют: 10.", 10),
         new("Инциденты", "2 балла за инцидент за период, максимум 10.", 10)
     ];

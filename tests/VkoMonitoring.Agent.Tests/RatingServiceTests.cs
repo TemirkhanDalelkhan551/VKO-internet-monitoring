@@ -23,12 +23,27 @@ public sealed class RatingServiceTests
     }
 
     [Fact]
-    public void BuildItem_MarksObjectWithoutMeasurementsAsNoData()
+    public void BuildItem_ExcludesObjectWithoutCompleteMeasurementFromRanking()
     {
         var rating = RatingService.BuildItem(Guid.NewGuid(), "Школа", null, null, [], 0,
             MeasurementFreshness.Missing, new OperationalSettings([], 20, 20, 100, 30, 2, 99));
 
         Assert.Null(rating.Score);
-        Assert.Equal("Нет данных", rating.Category);
+        Assert.Null(rating.Rank);
+        Assert.Equal("Недостаточно данных", rating.Category);
+    }
+
+    [Fact]
+    public void BuildItem_ExcludesObjectWithOnlyIncompleteMeasurementFromRanking()
+    {
+        var row = new MeasurementReportRow(Guid.NewGuid(), "Школа", Guid.NewGuid(), "Точка", null,
+            DateTimeOffset.UtcNow, null, null, null, null, null, "Offline", true);
+
+        var rating = RatingService.BuildItem(Guid.NewGuid(), "Школа", null, null, [row], 0,
+            MeasurementFreshness.Fresh, new OperationalSettings([], 20, 20, 100, 30, 2, 99));
+
+        Assert.Null(rating.Score);
+        Assert.Null(rating.Rank);
+        Assert.Equal("Недостаточно данных", rating.Category);
     }
 }

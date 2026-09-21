@@ -34,6 +34,18 @@ export function freshnessDescription(item) {
   return "Актуальный замер";
 }
 
+export function measurementAge(value, now = Date.now()) {
+  const measured = value ? new Date(value).getTime() : NaN;
+  if (!Number.isFinite(measured) || !Number.isFinite(now)) return "замеров ещё нет";
+  const seconds = Math.max(0, Math.floor((now - measured) / 1000));
+  if (seconds < 60) return "только что";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  return `${Math.floor(hours / 24)} дн назад`;
+}
+
 export function schoolMeasurementDescription(school) {
   return school.primaryLineId ? freshnessDescription(school) : "Нет сводки основной линии";
 }

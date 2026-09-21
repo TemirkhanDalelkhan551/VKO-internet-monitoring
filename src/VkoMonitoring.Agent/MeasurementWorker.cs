@@ -45,16 +45,17 @@ public sealed class MeasurementWorker(
             if (!loadDecision.CanRunMeasurement)
             {
                 logger.LogWarning(
-                    "Measurement skipped to avoid interfering with the user. CPU={CpuUsagePercent}%, network={NetworkMbps} Mbps.",
+                    "Load deferral limit was reached. A measurement will run to preserve monitoring continuity. CPU={CpuUsagePercent}%, network={NetworkMbps} Mbps.",
                     loadDecision.Snapshot.CpuUsagePercent,
                     loadDecision.Snapshot.NetworkMegabitsPerSecond);
-                return;
             }
-
-            logger.LogInformation(
-                "System load permits measurement: CPU={CpuUsagePercent}%, network={NetworkMbps} Mbps.",
-                loadDecision.Snapshot.CpuUsagePercent,
-                loadDecision.Snapshot.NetworkMegabitsPerSecond);
+            else
+            {
+                logger.LogInformation(
+                    "System load permits measurement: CPU={CpuUsagePercent}%, network={NetworkMbps} Mbps.",
+                    loadDecision.Snapshot.CpuUsagePercent,
+                    loadDecision.Snapshot.NetworkMegabitsPerSecond);
+            }
 
             var result = await collector.CollectAsync(cancellationToken);
             logger.LogInformation(
