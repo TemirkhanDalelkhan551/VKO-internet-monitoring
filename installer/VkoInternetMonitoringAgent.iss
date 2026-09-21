@@ -1,5 +1,5 @@
 #define ProductName "Мониторинг интернета ВКО"
-#define ProductVersion "1.4.0"
+#define ProductVersion "1.5.0"
 #define ProductPublisher "Команда хакатона ВКО"
 #define ServiceName "VkoInternetMonitoringAgent"
 
