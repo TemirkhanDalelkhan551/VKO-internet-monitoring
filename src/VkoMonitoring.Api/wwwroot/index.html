@@ -35,11 +35,11 @@
   <div id="dashboard-view" class="dashboard" hidden>
     <aside class="sidebar">
       <div class="brand"><img src="/mark.svg" alt="" width="36" height="36"><span>ВКО<span class="brand-sub">Мониторинг интернета</span></span></div>
-      <p class="nav-label">Рабочее пространство</p><a class="nav-item selected" href="/" aria-current="page"><span aria-hidden="true">▦</span> Школы и линии</a>
-      <button id="open-incidents" class="nav-item" type="button">Инциденты</button>
-      <button id="open-ratings" class="nav-item" type="button">Рейтинг качества</button>
-      <button id="open-notifications" class="nav-item" type="button" hidden>Уведомления</button>
-      <button id="open-admin" class="nav-item" type="button" hidden>Администрирование</button>
+      <p class="nav-label">Рабочее пространство</p><a class="nav-item selected" href="/" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span> Школы и линии</a>
+      <button id="open-incidents" class="nav-item" type="button"><span class="nav-icon" aria-hidden="true">!</span>Инциденты</button>
+      <button id="open-ratings" class="nav-item" type="button"><span class="nav-icon" aria-hidden="true">↗</span>Рейтинг качества</button>
+      <button id="open-notifications" class="nav-item" type="button" hidden><span class="nav-icon" aria-hidden="true">•</span>Уведомления</button>
+      <button id="open-admin" class="nav-item" type="button" hidden><span class="nav-icon" aria-hidden="true">⚙</span>Администрирование</button>
       <div class="sidebar-bottom"><p class="nav-label">Область доступа</p><p id="access-description" class="access-description"></p><div class="account"><div id="user-avatar" class="avatar" aria-hidden="true"></div><div><strong id="user-name"></strong><span id="user-role"></span></div></div><button id="logout" class="logout" type="button">Выйти из системы <span aria-hidden="true">↗</span></button></div>
     </aside>
     <main id="main-content" class="main" tabindex="-1">
