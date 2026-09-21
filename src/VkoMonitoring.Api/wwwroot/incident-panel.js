@@ -4,7 +4,7 @@ import { timestamp } from "./dashboard-model.js";
 
 export function createIncidentPanel({ element, request, getSession, onUnauthorized }) {
   const host = document.getElementById("incidents-panel");
-  let schools = [], permissions = incidentPermissions(null), selected = "", generation = 0, listVersion = 0, detailVersion = 0, writing = false;
+  let schools = [], permissions = incidentPermissions(null), canDraftWithAi = false, selected = "", generation = 0, listVersion = 0, detailVersion = 0, writing = false;
   let listController, detailController;
   const button = (text, action, className = "button secondary") => { const node = element("button", className, text); node.type = "button"; node.addEventListener("click", action); return node; };
   const filters = element("form", "incident-filters"), list = element("div"), detail = element("section", "incident-detail"); detail.hidden = true;
@@ -110,7 +110,20 @@ export function createIncidentPanel({ element, request, getSession, onUnauthoriz
     const appealFeedback = element("p", "section-note"); appealFeedback.setAttribute("role", "status");
     const copyAppeal = button("Скопировать текст", async () => { if (!confirmed.checked) { appealFeedback.textContent = "Сначала проверьте текст и подтвердите проверку."; return; } try { await navigator.clipboard.writeText(appealText.value); appealFeedback.textContent = "Текст скопирован."; } catch { appealFeedback.textContent = "Не удалось скопировать автоматически. Выделите текст вручную."; } });
     const printAppeal = button("Печать / сохранить PDF", () => { if (!confirmed.checked) { appealFeedback.textContent = "Сначала проверьте текст и подтвердите проверку."; return; } const frame = document.createElement("iframe"); frame.hidden = true; document.body.append(frame); const doc = frame.contentDocument; doc.open(); doc.write(`<title>${escapeHtml(row.incidentNumber)}</title><style>body{font:14pt Arial;line-height:1.5;margin:25mm}h1{font-size:20pt}pre{white-space:pre-wrap;font:inherit}</style><h1>Обращение провайдеру</h1><pre>${escapeHtml(appealText.value)}</pre>`); doc.close(); frame.contentWindow.focus(); frame.contentWindow.print(); setTimeout(() => frame.remove(), 1000); });
-    appeal.append(appealSummary, element("p", "section-note", "Текст создан по данным инцидента без ИИ. Отредактируйте и подтвердите его; затем распечатайте или выберите «Сохранить как PDF» в окне печати."), appealText, confirmLabel, copyAppeal, printAppeal, appealFeedback); detail.append(appeal);
+    const aiDraft = button("Создать AI-черновик по замерам", async () => {
+      aiDraft.disabled = true; appealFeedback.textContent = "AI формирует черновик по фактическим замерам…";
+      try {
+        const result = await request(`/api/incidents/${row.incidentId}/appeal-draft`, { method: "POST", token: getSession().token });
+        appealText.value = result.text; confirmed.checked = false;
+        appealFeedback.textContent = `Черновик создан моделью ${result.model}. Проверьте факты и адресата перед отправкой.`;
+      } catch (error) {
+        if (error.status === 401) { onUnauthorized(); return; }
+        appealFeedback.textContent = error.status === 503 ? "AI-черновик пока не настроен или временно недоступен." : "Не удалось создать AI-черновик. Можно использовать обычный текст обращения.";
+      } finally { aiDraft.disabled = false; }
+    });
+    appeal.append(appealSummary, element("p", "section-note", canDraftWithAi ? "AI получает только данные инцидента и агрегированные замеры за период. Черновик не отправляется провайдеру автоматически: проверьте и подтвердите его." : "Обычный черновик создан по данным инцидента. AI-черновик доступен региональному пользователю и администратору после настройки ключа."));
+    if (canDraftWithAi) appeal.append(aiDraft);
+    appeal.append(appealText, confirmLabel, copyAppeal, printAppeal, appealFeedback); detail.append(appeal);
     const changes = element("div", "directory-grid");
     function changeForm(heading, path, method, inputs, body) {
       const form = element("form", "directory-form"); form.append(element("h4", "", heading));
@@ -143,7 +156,7 @@ export function createIncidentPanel({ element, request, getSession, onUnauthoriz
   function configure(available, user) {
     const updatedPermissions = incidentPermissions(user?.role);
     if (JSON.stringify(permissions) !== JSON.stringify(updatedPermissions)) closeDetail();
-    schools = available; permissions = updatedPermissions; creation.hidden = !permissions.create;
+    schools = available; permissions = updatedPermissions; canDraftWithAi = ["Administrator", "Regional"].includes(user?.role); creation.hidden = !permissions.create;
     for (const select of [schoolFilter, createSchool]) {
       const old = select.value;
       select.replaceChildren(...(select === schoolFilter ? [new Option("Все доступные школы", "")] : []), ...schools.map(school => new Option(school.name, school.schoolId)));

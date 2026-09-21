@@ -5,6 +5,7 @@ import { createSchoolMap } from "./school-map.js";
 import { createDirectoryPanel } from "./directory-panel.js";
 import { contractShortfalls } from "./directory-model.js";
 import { createIncidentPanel } from "./incident-panel.js";
+import { createRatingPanel } from "./rating-panel.js";
 import { createAdminPanel } from "./admin-panel.js";
 import { createNotificationPanel } from "./notification-panel.js";
 
@@ -63,6 +64,7 @@ function endSession(text = "") {
   schoolMap.clear();
   directoryPanel.clear();
   incidentPanel.clear();
+  ratingPanel.clear();
   adminPanel.clear();
   notificationPanel.clear();
   state.controller?.abort();
@@ -288,6 +290,9 @@ const directoryPanel = createDirectoryPanel({ element, request,
 const incidentPanel = createIncidentPanel({ element, request,
   getSession: () => ({ token: state.token, epoch: state.epoch }),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
+const ratingPanel = createRatingPanel({ element, request,
+  getSession: () => ({ token: state.token, epoch: state.epoch }),
+  onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
 const adminPanel = createAdminPanel({ element, request,
   getSession: () => ({ token: state.token, epoch: state.epoch, user: state.user }),
   onUnauthorized: () => endSession("Сессия завершена или доступ изменён. Войдите заново.") });
@@ -344,7 +349,8 @@ byId("logout").addEventListener("click", async () => {
   catch (error) { if (epoch === state.epoch && error.status !== 401) message("login-message", "Данные в этой вкладке очищены, но сервер не подтвердил выход. Проверьте соединение."); }
 });
 byId("refresh").addEventListener("click", refresh);
-byId("open-incidents").addEventListener("click", () => { schoolPanel.clear(); document.title = "Школы и линии · Мониторинг интернета ВКО"; incidentPanel.showSchool(""); });
+byId("open-incidents").addEventListener("click", () => { schoolPanel.clear(); ratingPanel.clear(); document.title = "Школы и линии · Мониторинг интернета ВКО"; incidentPanel.showSchool(""); });
+byId("open-ratings").addEventListener("click", () => { schoolPanel.clear(); incidentPanel.clear(); document.title = "Рейтинг качества · Мониторинг интернета ВКО"; ratingPanel.open(); });
 byId("open-admin").addEventListener("click", () => adminPanel.open());
 byId("open-notifications").addEventListener("click", () => notificationPanel.open());
 for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).addEventListener(id === "search" ? "input" : "change", renderSchools);

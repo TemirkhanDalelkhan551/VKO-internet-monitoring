@@ -29,7 +29,8 @@ public sealed class JsonFileMonitoringReadRepository(
             .Select(m => new MeasurementReportRow(m.SchoolId, bindings[m.DeviceId].SchoolName ?? m.SchoolId.ToString(),
                 m.DeviceId, bindings[m.DeviceId].DeviceName ?? m.DeviceId.ToString(), null, m.MeasuredAtUtc,
                 m.DownloadMbps, m.UploadMbps, m.PingMilliseconds, m.JitterMilliseconds, m.PacketLossPercent,
-                m.ConnectionStatus.ToString(), MonitoringStatusEvaluator.Evaluate(m, options.Thresholds) != MonitoringStatus.Normal)).ToArray();
+                m.ConnectionStatus.ToString(), MonitoringStatusEvaluator.Evaluate(m, options.Thresholds) != MonitoringStatus.Normal)
+                { LineId = m.LineId, LineName = bindings[m.DeviceId].LineName }).ToArray();
     }
 
     public async Task<IReadOnlyList<SchoolOverview>> GetSchoolsAsync(

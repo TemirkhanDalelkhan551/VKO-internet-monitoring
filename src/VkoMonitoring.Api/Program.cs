@@ -31,12 +31,22 @@ var options = builder.Configuration
     .GetRequiredSection(MonitoringApiOptions.SectionName)
     .Get<MonitoringApiOptions>()
     ?? throw new InvalidOperationException("Monitoring API configuration is missing.");
+var appealDraftOptions = builder.Configuration
+    .GetSection(OpenAiAppealDraftOptions.SectionName)
+    .Get<OpenAiAppealDraftOptions>() ?? new OpenAiAppealDraftOptions();
 
 var postgresConnectionString = PostgresConnectionStringResolver.Resolve(
     builder.Configuration.GetConnectionString("MonitoringDatabase"));
 MonitoringApiOptionsValidator.Validate(options, postgresConnectionString);
 
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton(appealDraftOptions);
+builder.Services.AddHttpClient<IAppealDraftGenerator, OpenAiAppealDraftGenerator>(client =>
+{
+    client.BaseAddress = new Uri(appealDraftOptions.BaseUrl, UriKind.Absolute);
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(appealDraftOptions.TimeoutSeconds, 5, 60));
+});
+builder.Services.AddScoped<RatingService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<MonitoringAccessContext>();
 builder.Services.AddSingleton<TokenValidator>();
@@ -628,6 +638,34 @@ app.MapGet(
     .RequireRateLimiting("admin-read");
 
 app.MapPost(
+    "/api/incidents/{incidentId:guid}/appeal-draft",
+    async (Guid incidentId, HttpRequest request, TokenValidator tokenValidator,
+        IIncidentRepository incidentRepository, IMonitoringReadRepository monitoringRepository,
+        IAppealDraftGenerator generator, TimeProvider timeProvider, CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault())) return Results.Unauthorized();
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+            return Results.Problem("AI drafts require PostgreSQL storage.", statusCode: StatusCodes.Status501NotImplemented);
+        var details = await incidentRepository.GetIncidentAsync(incidentId, cancellationToken);
+        if (details is null) return Results.NotFound();
+        var toUtc = timeProvider.GetUtcNow().AddMinutes(1);
+        var fromUtc = details.Incident.StartedAtUtc > toUtc.AddDays(-90) ? details.Incident.StartedAtUtc : toUtc.AddDays(-90);
+        var rows = await monitoringRepository.GetReportRowsAsync(
+            new ReportFilter(details.Incident.SchoolId, [], fromUtc, toUtc, null), 10_000, cancellationToken);
+        try
+        {
+            var draft = await generator.GenerateAsync(AppealDraftFactsFactory.Create(details.Incident,
+                rows.Where(row => row.LineId == details.Incident.LineId)), cancellationToken);
+            return Results.Ok(new { draft.Text, draft.Model, factsPeriodFromUtc = fromUtc, factsPeriodToUtc = toUtc });
+        }
+        catch (AppealDraftUnavailableException)
+        {
+            return Results.Problem("AI draft is temporarily unavailable or not configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+    })
+    .RequireRateLimiting("admin-write");
+
+app.MapPost(
     "/api/activation-codes/{activationCodeId:guid}/revoke",
     async (Guid activationCodeId, IDeviceActivationRepository repository, CancellationToken cancellationToken) =>
     {
@@ -841,6 +879,22 @@ app.MapGet(
             toUtc,
             Math.Clamp(limit ?? 200, 1, 1_000),
             cancellationToken));
+    })
+    .RequireRateLimiting("admin-read");
+
+app.MapGet(
+    "/api/ratings",
+    async (DateTimeOffset? from, DateTimeOffset? to, HttpRequest request, TokenValidator tokenValidator,
+        RatingService ratings, TimeProvider timeProvider, CancellationToken cancellationToken) =>
+    {
+        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault())) return Results.Unauthorized();
+        if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+            return Results.Problem("Ratings require PostgreSQL storage.", statusCode: StatusCodes.Status501NotImplemented);
+        var toUtc = to ?? timeProvider.GetUtcNow().AddMinutes(1);
+        var fromUtc = from ?? toUtc.AddDays(-30);
+        if (fromUtc >= toUtc) return Results.ValidationProblem(new Dictionary<string, string[]> { ["period"] = ["The start of the period must be earlier than the end."] });
+        try { return Results.Ok(await ratings.BuildAsync(fromUtc, toUtc, cancellationToken)); }
+        catch (InvalidOperationException) { return Results.Problem("Too many measurements for the selected period. Choose a shorter period.", statusCode: StatusCodes.Status422UnprocessableEntity); }
     })
     .RequireRateLimiting("admin-read");
 

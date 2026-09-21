@@ -36,7 +36,7 @@ public sealed class PostgresMonitoringReadRepository(
         ReportFilter filter, int limit, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT s.id, s.name, d.id, d.name, d.room, m.measured_at_utc,
+            SELECT s.id, s.name, d.id, d.name, d.room, m.measured_at_utc, m.line_id, l.name,
                    m.download_mbps, m.upload_mbps, m.ping_milliseconds,
                    m.jitter_milliseconds, m.packet_loss_percent, m.connection_status,
                    (m.connection_status <> 'Online'
@@ -48,6 +48,7 @@ public sealed class PostgresMonitoringReadRepository(
             FROM measurements m
             JOIN schools s ON s.id = m.school_id
             JOIN devices d ON d.id = m.device_id AND d.school_id = m.school_id AND d.line_id = m.line_id
+            JOIN internet_lines l ON l.id = m.line_id
             WHERE m.measured_at_utc >= $1 AND m.measured_at_utc < $2
               AND ($3::uuid IS NULL OR m.school_id = $3)
               AND (cardinality($4::uuid[]) = 0 OR m.device_id = ANY($4))
@@ -66,8 +67,9 @@ public sealed class PostgresMonitoringReadRepository(
         var rows = new List<MeasurementReportRow>();
         while (await reader.ReadAsync(cancellationToken)) rows.Add(new MeasurementReportRow(
             reader.GetGuid(0), reader.GetString(1), reader.GetGuid(2), reader.GetString(3), GetNullableString(reader, 4),
-            reader.GetFieldValue<DateTimeOffset>(5), GetNullableDouble(reader, 6), GetNullableDouble(reader, 7),
-            GetNullableDouble(reader, 8), GetNullableDouble(reader, 9), GetNullableDouble(reader, 10), reader.GetString(11), reader.GetBoolean(12)));
+            reader.GetFieldValue<DateTimeOffset>(5), GetNullableDouble(reader, 8), GetNullableDouble(reader, 9),
+            GetNullableDouble(reader, 10), GetNullableDouble(reader, 11), GetNullableDouble(reader, 12), reader.GetString(13), reader.GetBoolean(14))
+            { LineId = reader.GetGuid(6), LineName = reader.GetString(7) });
         return rows;
     }
 
