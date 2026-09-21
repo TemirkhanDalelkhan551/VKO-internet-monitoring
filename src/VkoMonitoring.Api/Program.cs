@@ -771,7 +771,8 @@ app.MapPost(
                     binding.DeviceId,
                     binding.DeviceIdentifier,
                     deviceToken,
-                    binding.Recovered));
+                    binding.Recovered,
+                    binding.Reconfigured));
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {

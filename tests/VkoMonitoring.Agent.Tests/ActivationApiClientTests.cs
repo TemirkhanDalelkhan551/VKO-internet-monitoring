@@ -29,7 +29,8 @@ public sealed class ActivationApiClientTests
                   "lineName":"Основная линия",
                   "providerName":"Поставщик",
                   "connectionType":"Fiber",
-                  "expiresAtUtc":"2030-01-01T10:00:00+00:00"
+                  "expiresAtUtc":"2030-01-01T10:00:00+00:00",
+                  "isReconfiguration":true
                 }
                 """));
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://monitoring.example/") };
@@ -42,6 +43,7 @@ public sealed class ActivationApiClientTests
         Assert.Equal(schoolId, result.SchoolId);
         Assert.Equal(lineId, result.LineId);
         Assert.Equal("Школа № 1", result.SchoolName);
+        Assert.True(result.IsReconfiguration);
         Assert.Collection(
             handler.Requests,
             request => Assert.Equal("/health/ready", request.PathAndQuery),

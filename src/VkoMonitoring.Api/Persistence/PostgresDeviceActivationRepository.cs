@@ -88,7 +88,11 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
         const string sql = """
             SELECT c.school_id, s.name, c.line_id, l.name,
                    l.provider_name, l.connection_type, c.expires_at_utc,
-                   c.used_at_utc IS NOT NULL
+                   c.used_at_utc IS NOT NULL,
+                   c.used_at_utc IS NULL AND EXISTS (
+                       SELECT 1 FROM devices active_device
+                       WHERE active_device.device_identifier = $2
+                         AND active_device.lifecycle_status = 'Active')
             FROM device_activation_codes c
             JOIN schools s ON s.id = c.school_id
             JOIN internet_lines l ON l.id = c.line_id AND l.school_id = c.school_id
@@ -121,7 +125,8 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             reader.IsDBNull(4) ? null : reader.GetString(4),
             reader.IsDBNull(5) ? null : reader.GetString(5),
             reader.GetFieldValue<DateTimeOffset>(6),
-            reader.GetBoolean(7));
+            reader.GetBoolean(7),
+            reader.GetBoolean(8));
     }
 
     public async Task<ActivatedDeviceBinding?> ActivateAsync(
@@ -141,8 +146,30 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             return null;
         }
 
-        var effectiveDeviceId = codeBinding.Value.UsedByDeviceId ?? deviceId;
-        if (codeBinding.Value.UsedByDeviceId is null)
+        var recovered = codeBinding.Value.UsedByDeviceId is not null;
+        var existingDevice = recovered
+            ? null
+            : await LockActiveDeviceByIdentifierAsync(
+                connection, transaction, deviceIdentifier, cancellationToken);
+        var effectiveDeviceId = codeBinding.Value.UsedByDeviceId ?? existingDevice?.DeviceId ?? deviceId;
+        var reconfigured = existingDevice is not null;
+        if (recovered)
+        {
+            await RecoverDeviceAsync(
+                connection, transaction, request, effectiveDeviceId,
+                deviceTokenHash, cancellationToken);
+        }
+        else if (existingDevice is not null)
+        {
+            await ReconfigureDeviceAsync(
+                connection, transaction, request, effectiveDeviceId,
+                codeBinding.Value.SchoolId, codeBinding.Value.LineId,
+                existingDevice.Value, deviceTokenHash, cancellationToken);
+            await MarkCodeUsedAsync(
+                connection, transaction, codeBinding.Value.CodeId,
+                effectiveDeviceId, cancellationToken);
+        }
+        else
         {
             await InsertDeviceAsync(
                 connection, transaction, request, codeBinding.Value.SchoolId,
@@ -152,12 +179,6 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
                 connection, transaction, codeBinding.Value.CodeId,
                 effectiveDeviceId, cancellationToken);
         }
-        else
-        {
-            await RecoverDeviceAsync(
-                connection, transaction, request, effectiveDeviceId,
-                deviceTokenHash, cancellationToken);
-        }
         await transaction.CommitAsync(cancellationToken);
 
         return new ActivatedDeviceBinding(
@@ -165,7 +186,8 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             codeBinding.Value.LineId,
             effectiveDeviceId,
             deviceIdentifier,
-            codeBinding.Value.UsedByDeviceId is not null);
+            recovered,
+            reconfigured);
     }
 
     private static async Task<(Guid CodeId, Guid SchoolId, Guid LineId, Guid? UsedByDeviceId)?> LockCodeForActivationAsync(
@@ -233,6 +255,75 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
         {
             throw new InvalidOperationException("The device cannot be recovered.");
         }
+    }
+
+    private static async Task<(Guid DeviceId, Guid SchoolId, Guid LineId)?> LockActiveDeviceByIdentifierAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string deviceIdentifier,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id, school_id, line_id
+            FROM devices
+            WHERE device_identifier = $1 AND lifecycle_status = 'Active'
+            FOR UPDATE;
+            """;
+        command.Parameters.AddWithValue(deviceIdentifier);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? (reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2))
+            : null;
+    }
+
+    private static async Task ReconfigureDeviceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DeviceActivationRequest request,
+        Guid deviceId,
+        Guid schoolId,
+        Guid lineId,
+        (Guid DeviceId, Guid SchoolId, Guid LineId) previousBinding,
+        byte[] deviceTokenHash,
+        CancellationToken cancellationToken)
+    {
+        await using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = """
+            UPDATE devices
+            SET school_id = $2, line_id = $3, name = $4, room = $5,
+                connection_type = $6, token_hash = $7, is_blocked = false
+            WHERE id = $1 AND lifecycle_status = 'Active';
+            """;
+        update.Parameters.AddWithValue(deviceId);
+        update.Parameters.AddWithValue(schoolId);
+        update.Parameters.AddWithValue(lineId);
+        update.Parameters.AddWithValue(request.DeviceName.Trim());
+        AddNullableText(update, request.Room);
+        AddNullableText(update, request.ConnectionType);
+        update.Parameters.AddWithValue(deviceTokenHash);
+        if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            throw new InvalidOperationException("The device cannot be reconfigured.");
+        }
+
+        await using var history = connection.CreateCommand();
+        history.Transaction = transaction;
+        history.CommandText = """
+            INSERT INTO device_lifecycle_history (
+                device_id, action, previous_school_id, previous_line_id,
+                current_school_id, current_line_id, reason, actor)
+            VALUES ($1, 'Rebound', $2, $3, $4, $5, $6, 'activation-code');
+            """;
+        history.Parameters.AddWithValue(deviceId);
+        history.Parameters.AddWithValue(previousBinding.SchoolId);
+        history.Parameters.AddWithValue(previousBinding.LineId);
+        history.Parameters.AddWithValue(schoolId);
+        history.Parameters.AddWithValue(lineId);
+        history.Parameters.AddWithValue("Повторная активация этого же компьютера по одноразовому коду.");
+        await history.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task InsertDeviceAsync(

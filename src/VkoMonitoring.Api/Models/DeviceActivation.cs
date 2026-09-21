@@ -27,7 +27,8 @@ public sealed record ActivationCodePreviewResult(
     string? ProviderName,
     string? ConnectionType,
     DateTimeOffset ExpiresAtUtc,
-    bool IsRecovery);
+    bool IsRecovery,
+    bool IsReconfiguration = false);
 
 public sealed record DeviceActivationRequest(
     string ActivationCode,
@@ -41,7 +42,8 @@ public sealed record ActivatedDeviceBinding(
     Guid LineId,
     Guid DeviceId,
     string DeviceIdentifier,
-    bool Recovered);
+    bool Recovered,
+    bool Reconfigured = false);
 
 public sealed record DeviceActivationResult(
     Guid SchoolId,
@@ -49,4 +51,5 @@ public sealed record DeviceActivationResult(
     Guid DeviceId,
     string DeviceIdentifier,
     string DeviceToken,
-    bool Recovered);
+    bool Recovered,
+    bool Reconfigured = false);

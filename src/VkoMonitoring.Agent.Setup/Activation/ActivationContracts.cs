@@ -10,7 +10,8 @@ public sealed record AgentActivationPreviewResult(
     string? ProviderName,
     string? ConnectionType,
     DateTimeOffset ExpiresAtUtc,
-    bool IsRecovery);
+    bool IsRecovery,
+    bool IsReconfiguration = false);
 
 public sealed record AgentActivationRequest(
     string ActivationCode,
@@ -25,4 +26,5 @@ public sealed record AgentActivationResult(
     Guid DeviceId,
     string DeviceIdentifier,
     string DeviceToken,
-    bool Recovered);
+    bool Recovered,
+    bool Reconfigured = false);

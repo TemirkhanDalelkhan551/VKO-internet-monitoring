@@ -249,6 +249,10 @@ public sealed class SetupForm : Form
                 $"Тип линии: {preview.ConnectionType ?? "не указан"}\n" +
                 $"Код действует до: {preview.ExpiresAtUtc.ToLocalTime():dd.MM.yyyy HH:mm}" +
                 (preview.IsRecovery ? "\n\nБудет восстановлена незавершённая активация этого компьютера." : string.Empty);
+            if (preview.IsReconfiguration)
+            {
+                confirmationDetails.Text += "\n\nЭтот компьютер уже зарегистрирован. Будет обновлена привязка к указанной линии и выпущен новый токен.";
+            }
             confirmationPanel.Visible = true;
             editButton.Visible = true;
             activateButton.Text = "Подтвердить и запустить";
@@ -286,7 +290,9 @@ public sealed class SetupForm : Form
                 : "Служба запущена. Первая связь пока не подтверждена; проверьте локальное состояние через минуту.";
 
             MessageBox.Show(
-                (result.Recovered ? "Активация компьютера успешно восстановлена.\n\n" : "Компьютер успешно подключён.\n\n") +
+                (result.Reconfigured
+                    ? "Компьютер успешно переподключён к выбранной линии.\n\n"
+                    : result.Recovered ? "Активация компьютера успешно восстановлена.\n\n" : "Компьютер успешно подключён.\n\n") +
                 $"Устройство: {input.DeviceName}\n" +
                 $"Идентификатор: {result.DeviceId:D}\n\n" +
                 (heartbeatConfirmed
