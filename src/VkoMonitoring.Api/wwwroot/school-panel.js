@@ -106,6 +106,44 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
     }
     table.append(head, body); scroll.append(table); node.append(scroll); return node;
   }
+  function hardwareView(data, devices) {
+    const node = section("Оборудование", "Снимок собирается при запуске агента и повторно сохраняется только при изменении конфигурации.");
+    if (!data) {
+      node.append(element("p", "empty-description", devices.length
+        ? "Агент ещё не передал инвентаризацию. Данные появятся после следующего запуска или перезапуска службы агента."
+        : "Для этой школы пока нет зарегистрированных устройств."));
+      return node;
+    }
+    const inventory = data.inventory, computer = inventory.computer || {}, os = inventory.operatingSystem || {}, memory = inventory.memory || {};
+    const value = input => input === null || input === undefined || input === "" ? "—" : String(input);
+    const size = bytes => bytes === null || bytes === undefined ? "—" : `${(Number(bytes) / 1073741824).toFixed(1)} ГБ`;
+    const card = (title, rows) => {
+      const item = element("article", "summary-card"); item.append(element("p", "summary-label", title));
+      for (const [label, content] of rows) item.append(element("p", "section-note", `${label}: ${value(content)}`));
+      return item;
+    };
+    const grid = element("div", "analytics-grid");
+    grid.append(
+      card("Компьютер", [["Имя", computer.hostName], ["Производитель", computer.manufacturer], ["Модель", computer.model], ["Серийный номер", computer.serialNumber]]),
+      card("Операционная система", [["Windows", os.name], ["Версия", [os.version, os.build].filter(Boolean).join(" · ")], ["Архитектура", os.architecture]]),
+      card("Процессор и память", [["CPU", inventory.processors?.map(cpu => cpu.name).filter(Boolean).join(", ")], ["Ядра / потоки", inventory.processors?.map(cpu => `${value(cpu.physicalCores)} / ${value(cpu.logicalProcessors)}`).join(", ")], ["RAM", size(memory.totalBytes)], ["Модулей", memory.modules?.length]]),
+      card("BIOS и плата", [["Плата", [inventory.firmware?.baseboardManufacturer, inventory.firmware?.baseboardProduct].filter(Boolean).join(" · ")], ["BIOS", [inventory.firmware?.biosManufacturer, inventory.firmware?.biosVersion].filter(Boolean).join(" · ")]])
+    );
+    node.append(grid);
+    const tableSection = (title, headers, rows) => {
+      const wrapper = element("div", "table-scroll"), table = element("table"), head = element("thead"), tr = element("tr"), body = element("tbody");
+      for (const header of headers) { const th = element("th", "", header); th.scope = "col"; tr.append(th); }
+      head.append(tr);
+      for (const row of rows) { const item = element("tr"); for (const cell of row) item.append(element("td", "", value(cell))); body.append(item); }
+      table.append(head, body); wrapper.append(table); const part = section(title); part.append(wrapper); return part;
+    };
+    if (inventory.storage?.length) node.append(tableSection("Накопители", ["Модель", "Тип", "Объём", "Интерфейс", "Серийный номер"], inventory.storage.map(disk => [disk.model, disk.mediaType, size(disk.capacityBytes), disk.busType, disk.serialNumber])));
+    if (inventory.graphics?.length) node.append(tableSection("Видеокарты", ["Название", "Память", "Драйвер"], inventory.graphics.map(gpu => [gpu.name, size(gpu.memoryBytes), gpu.driverVersion])));
+    if (inventory.networkAdapters?.length) node.append(tableSection("Сетевые адаптеры", ["Адаптер", "Производитель", "MAC", "Тип", "Статус"], inventory.networkAdapters.map(adapter => [adapter.name, adapter.manufacturer, adapter.macAddress, adapter.adapterType, adapter.isEnabled ? "Включён" : "Отключён"])));
+    node.append(element("p", "section-note", `Последнее обновление: ${timestamp(data.updatedAtUtc)}${data.changedAtUtc ? ` · конфигурация изменилась: ${timestamp(data.changedAtUtc)}` : ""}.`));
+    if (data.sensitiveDetailsHidden) node.append(element("p", "section-note", "Серийные номера и MAC-адреса скрыты для роли школы."));
+    return node;
+  }
   function svg(tag, attrs = {}, text) {
     const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -183,6 +221,11 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
       if (!valid()) return;
       if (!devices.some(device => device.deviceId === selectedDevice)) selectedDevice = devices.find(device => device.lineId === school.primaryLineId)?.deviceId || devices[0]?.deviceId || "";
       const rows = selectedDevice ? await request(`/api/devices/${selectedDevice}/measurements?${query}&limit=${historyLimit}`, options) : [];
+      let hardware = null;
+      if (selectedDevice) {
+        try { hardware = await request(`/api/devices/${selectedDevice}/inventory`, options); }
+        catch (error) { if (error.status !== 404) throw error; }
+      }
       if (!valid()) return;
       const lines = section("Линии школы", "Показано текущее состояние доступных вам линий; выбор периода влияет на итоги и историю.");
       const grid = element("div", "line-grid"); grid.append(...school.lines.map(lineCard));
@@ -191,7 +234,7 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
       for (const [label, value] of [["Ответственный", school.responsibleName], ["Должность", school.responsiblePosition],
         ["Телефон", school.responsiblePhone], ["Электронная почта", school.responsibleEmail]])
         contacts.append(element("p", "section-note", `${label}: ${value || "не указан"}`));
-      content.replaceChildren(contacts, lines, analyticsView(analytics), devicesView(devices, school), historyView(rows, devices));
+      content.replaceChildren(contacts, lines, analyticsView(analytics), devicesView(devices, school), hardwareView(hardware, devices), historyView(rows, devices));
       updated.textContent = `Обновлено ${timestamp(new Date().toISOString())}`;
     } catch (error) {
       if (!valid()) return;

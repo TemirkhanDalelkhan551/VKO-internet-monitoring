@@ -60,6 +60,7 @@ builder.Services.AddSingleton<OutboxDispatcher>();
 builder.Services.AddSingleton<DispatchRetryPolicy>();
 builder.Services.AddSingleton<ISystemLoadSampler, WindowsSystemLoadSampler>();
 builder.Services.AddSingleton<ISystemLoadGuard, SystemLoadGuard>();
+builder.Services.AddSingleton<IHardwareInventoryCollector, WindowsHardwareInventoryCollector>();
 
 if (string.IsNullOrWhiteSpace(agentOptions.DeviceTokenFile))
 {
@@ -91,10 +92,16 @@ builder.Services.AddHttpClient<IHeartbeatApiClient, HttpHeartbeatApiClient>(clie
     client.BaseAddress = new Uri(agentOptions.ApiBaseUrl);
     client.Timeout = TimeSpan.FromSeconds(15);
 });
+builder.Services.AddHttpClient<IHardwareInventoryApiClient, HttpHardwareInventoryApiClient>(client =>
+{
+    client.BaseAddress = new Uri(agentOptions.ApiBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
 builder.Services.AddHostedService<MeasurementWorker>();
 builder.Services.AddHostedService<OutboxWorker>();
 builder.Services.AddHostedService<HeartbeatWorker>();
+builder.Services.AddHostedService<HardwareInventoryWorker>();
 
 var host = builder.Build();
 host.Run();

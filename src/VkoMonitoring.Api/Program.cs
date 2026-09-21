@@ -156,6 +156,7 @@ if (options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreC
     builder.Services.AddSingleton<IDeviceActivationRepository, PostgresDeviceActivationRepository>();
     builder.Services.AddSingleton<IOperationalSettingsRepository, PostgresOperationalSettingsRepository>();
     builder.Services.AddSingleton<IIncidentRepository, PostgresIncidentRepository>();
+    builder.Services.AddSingleton<IDeviceInventoryRepository, PostgresDeviceInventoryRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, PostgresReadinessProbe>();
 }
 else
@@ -169,6 +170,7 @@ else
     builder.Services.AddSingleton<IDeviceActivationRepository, UnsupportedDeviceActivationRepository>();
     builder.Services.AddSingleton<IOperationalSettingsRepository, ConfiguredOperationalSettingsRepository>();
     builder.Services.AddSingleton<IIncidentRepository, UnsupportedIncidentRepository>();
+    builder.Services.AddSingleton<IDeviceInventoryRepository, UnsupportedDeviceInventoryRepository>();
     builder.Services.AddSingleton<IApiReadinessProbe, LocalStorageReadinessProbe>();
 }
 
@@ -353,6 +355,48 @@ app.MapGet(
         });
     })
     .RequireRateLimiting("agent-read");
+
+app.MapPost(
+    "/api/devices/{deviceId:guid}/inventory",
+    async (
+        Guid deviceId,
+        Guid schoolId,
+        Guid lineId,
+        VkoMonitoring.Agent.Core.Domain.HardwareInventory inventory,
+        HttpRequest request,
+        IDeviceAuthenticator authenticator,
+        IDeviceInventoryRepository repository,
+        CancellationToken cancellationToken) =>
+    {
+        if (!await authenticator.IsAuthorizedAsync(schoolId, deviceId, lineId,
+                request.Headers["X-Device-Token"].FirstOrDefault(), cancellationToken))
+            return Results.Unauthorized();
+        if (inventory.DeviceId != deviceId || inventory.SchoolId != schoolId || inventory.LineId != lineId ||
+            inventory.CollectedAtUtc == default || string.IsNullOrWhiteSpace(inventory.SchemaVersion) ||
+            inventory.SchemaVersion.Length > 20)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["inventory"] = ["Inventory binding and schema version are invalid."] });
+        var result = await repository.SaveAsync(inventory, cancellationToken);
+        return Results.Ok(result);
+    })
+    .RequireRateLimiting("agent-write");
+
+app.MapGet(
+    "/api/devices/{deviceId:guid}/inventory",
+    async (Guid deviceId, HttpRequest request, IDeviceInventoryRepository repository, CancellationToken cancellationToken) =>
+    {
+        var record = await repository.GetAsync(deviceId, cancellationToken);
+        if (record is null) return Results.NotFound();
+        var access = MonitoringRequestAccess.From(request.HttpContext);
+        var canViewSensitive = access?.User is null or { Role: UserRole.Administrator or UserRole.Regional };
+        return Results.Ok(new
+        {
+            inventory = canViewSensitive ? record.Inventory : RedactSensitiveInventory(record.Inventory),
+            record.UpdatedAtUtc,
+            record.ChangedAtUtc,
+            sensitiveDetailsHidden = !canViewSensitive
+        });
+    })
+    .RequireRateLimiting("admin-read");
 
 app.MapPost(
     "/api/devices/{deviceId:guid}/problem-reports",
@@ -1392,3 +1436,15 @@ static string FormatDeviceReportFacts(VkoMonitoring.Api.Models.MeasurementSnapsh
 
 static string FormatFact(double? value, string unit) =>
     value is null ? "нет данных" : $"{value.Value:0.##} {unit}";
+
+static VkoMonitoring.Agent.Core.Domain.HardwareInventory RedactSensitiveInventory(
+    VkoMonitoring.Agent.Core.Domain.HardwareInventory inventory) => inventory with
+{
+    Computer = inventory.Computer with { SerialNumber = null, SystemUuid = null },
+    Memory = inventory.Memory with
+    {
+        Modules = inventory.Memory.Modules.Select(module => module with { SerialNumber = null }).ToArray()
+    },
+    Storage = inventory.Storage.Select(storage => storage with { SerialNumber = null }).ToArray(),
+    NetworkAdapters = inventory.NetworkAdapters.Select(adapter => adapter with { MacAddress = null }).ToArray()
+};

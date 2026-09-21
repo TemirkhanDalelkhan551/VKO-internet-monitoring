@@ -13,5 +13,6 @@
     <EmbeddedResource Include="Persistence\Sql\001_initial_schema.sql" />
     <EmbeddedResource Include="Persistence\Sql\002_users_and_audit.sql" />
     <EmbeddedResource Include="Persistence\Sql\003_web_operations.sql" />
+    <EmbeddedResource Include="Persistence\Sql\004_hardware_inventory.sql" />
   </ItemGroup>
 </Project>

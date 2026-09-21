@@ -33,6 +33,10 @@ public sealed class PostgresDatabaseInitializer(
             "VkoMonitoring.Api.Persistence.Sql.003_web_operations.sql",
             "Web operations schema resource was not found.",
             cancellationToken);
+        await ExecuteEmbeddedScriptAsync(
+            "VkoMonitoring.Api.Persistence.Sql.004_hardware_inventory.sql",
+            "Hardware inventory schema resource was not found.",
+            cancellationToken);
 
         foreach (var (deviceIdentifier, binding) in options.DeviceBindings)
         {
