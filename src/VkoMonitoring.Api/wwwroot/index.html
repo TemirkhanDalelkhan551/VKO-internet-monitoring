@@ -16,12 +16,12 @@
   <section id="login-view" class="login-view" aria-label="Вход в систему">
     <div class="login-story">
       <div class="brand"><img src="/mark.svg" alt="" width="40" height="40"><span>ВКО<span class="brand-sub">Мониторинг интернета</span></span></div>
-      <div class="story-copy"><p class="eyebrow">Организации образования</p><h1>Связь, которую<br> видно.</h1><p>Показатели интернета, состояние линий и связь с устройствами школ — в одной системе.</p></div>
+      <div class="story-copy"><p class="eyebrow">Организации образования</p><h1>Контроль связи<br> для школ ВКО</h1><p>Оперативная картина качества интернета, линий связи и устройств в одном рабочем месте.</p></div>
       <div class="signal-art" aria-hidden="true"><span class="signal-ring ring-one"></span><span class="signal-ring ring-two"></span><span class="signal-ring ring-three"></span><span class="signal-center"></span><span class="signal-node node-one"></span><span class="signal-node node-two"></span><span class="signal-node node-three"></span></div>
       <p class="story-footer">Восточно-Казахстанская область</p>
     </div>
     <div class="login-panel"><div class="login-box">
-      <p class="eyebrow muted">Панель мониторинга</p><h2>Вход в систему</h2><p class="lead">Используйте учётную запись вашей организации.</p>
+      <p class="eyebrow muted">Рабочая панель</p><h2>Вход в систему</h2><p class="lead">Используйте учётную запись вашей организации для доступа к мониторингу.</p>
       <form id="login-form">
         <label for="login">Логин</label><input id="login" name="login" autocomplete="username" required maxlength="64" placeholder="Ваш логин" spellcheck="false" autocapitalize="none">
         <label for="password">Пароль</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="Ваш пароль"><button id="show-password" class="password-toggle" type="button" aria-label="Показать пароль" aria-pressed="false">Показать</button></div>
@@ -43,7 +43,7 @@
       <div class="sidebar-bottom"><p class="nav-label">Область доступа</p><p id="access-description" class="access-description"></p><div class="account"><div id="user-avatar" class="avatar" aria-hidden="true"></div><div><strong id="user-name"></strong><span id="user-role"></span></div></div><button id="logout" class="logout" type="button">Выйти из системы <span aria-hidden="true">↗</span></button></div>
     </aside>
     <main id="main-content" class="main" tabindex="-1">
-      <header id="overview-header" class="page-header"><div><p class="breadcrumb">Восточно-Казахстанская область <span>/</span> Обзор</p><h1>Школы и линии</h1><p class="page-subtitle">Текущее состояние интернета в вашей области доступа.</p></div><div class="refresh-area"><button id="refresh" class="button secondary" type="button"><span aria-hidden="true">↻</span> Обновить</button><span id="updated-at" class="updated-at" aria-live="polite"></span></div></header>
+      <header id="overview-header" class="page-header"><div><p class="breadcrumb">Восточно-Казахстанская область <span>/</span> Обзор</p><h1>Школы и линии</h1><p class="page-subtitle">Оперативная сводка по доступным школам и линиям связи.</p></div><div class="refresh-area"><button id="refresh" class="button secondary" type="button"><span aria-hidden="true">↻</span> Обновить</button><span id="updated-at" class="updated-at" aria-live="polite"></span></div></header>
       <div id="dashboard-message" class="message" role="alert" hidden></div>
       <section id="summary" class="summary" aria-label="Сводные показатели"></section>
       <div id="overview-tools"></div>
