@@ -1,6 +1,6 @@
 # Быстрые эксплуатационные процедуры
 
-Дата актуализации: 20.09.2026. Команды выполняются из корня проекта в PowerShell.
+Дата актуализации: 21.09.2026. Команды выполняются из корня проекта в PowerShell.
 
 ## Автоматическая проверка изменений
 
@@ -14,7 +14,7 @@ Workflow `.github/workflows/ci.yml` запускается для каждого
 
 ```powershell
 .\scripts\verify-installer.ps1 `
-  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.4.0-win-x64.exe
+  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.5.0-win-x64.exe
 ```
 
 ## Подпись релиза и timestamp
@@ -43,18 +43,18 @@ Remove-Item Env:\VKO_CODE_SIGNING_PFX_PASSWORD
 
 ```powershell
 .\scripts\verify-installer.ps1 `
-  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.4.0-win-x64.exe `
+  -InstallerPath .\artifacts\installer\VkoInternetMonitoringAgent-Setup-1.5.0-win-x64.exe `
   -RequireValidSignature -RequireTimestamp
 ```
 
-PFX, пароль и закрытый ключ не сохраняются в Git, логах или артефактах. Текущий локальный установщик 1.4.0 собран без подписи, потому что доверенный сертификат ещё не предоставлен.
+PFX, пароль и закрытый ключ не сохраняются в Git, логах или артефактах. Текущий локальный установщик 1.5.0 собран без подписи, потому что доверенный сертификат ещё не предоставлен.
 
 ## Тихое обновление установленного агента
 
 Текущий Inno Setup поддерживает тихий режим. Для уже активированного компьютера обновление сохраняет конфигурацию и DPAPI-токен:
 
 ```powershell
-.\VkoInternetMonitoringAgent-Setup-1.4.0-win-x64.exe `
+.\VkoInternetMonitoringAgent-Setup-1.5.0-win-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LOG="$env:TEMP\vko-agent-install.log"
 ```

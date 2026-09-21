@@ -27,4 +27,4 @@ dotnet build VkoInternetMonitoring.sln -c Release
 docker build -f src/VkoMonitoring.Api/Dockerfile -t vko-monitoring-demo:history .
 ```
 
-После этапа карточки добавлены и опубликованы на Render карта, аналитика, CSV/XLSX, справочники, коды, инциденты и административные веб-экраны. Обращение поставщику реализовано без AI по текущему решению пользователя; см. PROJECT_CHECKLIST.md.
+После этапа карточки добавлены и опубликованы на Render карта, аналитика, CSV/XLSX, справочники, коды, инциденты, административные веб-экраны, рейтинг и AI-черновик обращения. См. PROJECT_CHECKLIST.md.
