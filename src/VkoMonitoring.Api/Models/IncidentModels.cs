@@ -68,6 +68,17 @@ public sealed record ManualIncidentCreateRequest(
 
 public sealed record ManualIncidentCreateResult(Guid IncidentId);
 
+// Sent by an installed monitoring agent. The server obtains measurement facts itself,
+// so the client cannot fabricate the indicators attached to an appeal.
+public sealed record DeviceProblemReportRequest(
+    Guid SchoolId,
+    Guid LineId,
+    string Comment);
+
+public sealed record DeviceProblemReportResult(
+    Guid IncidentId,
+    bool Created);
+
 public sealed record IncidentStatusChangeRequest(
     IncidentStatus Status,
     string Actor,

@@ -5,4 +5,7 @@ public sealed record LocalAgentSettings(
     Guid DeviceId,
     Guid LineId,
     Uri ApiBaseUri,
-    string DeviceToken);
+    string DeviceToken)
+{
+    public string[] MeasurementWindows { get; init; } = [];
+}

@@ -48,6 +48,18 @@ public sealed class LocalAgentSettingsReader(SetupPaths paths)
             throw new InvalidOperationException("Защищённый токен устройства пуст.");
         }
 
-        return new LocalAgentSettings(schoolId, deviceId, lineId, apiBaseUri, token);
+        var windows = agent.TryGetProperty("MeasurementWindows", out var measurementWindows) &&
+                      measurementWindows.ValueKind == JsonValueKind.Array
+            ? measurementWindows.EnumerateArray()
+                .Where(value => value.ValueKind == JsonValueKind.String)
+                .Select(value => value.GetString())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .ToArray()
+            : [];
+        return new LocalAgentSettings(schoolId, deviceId, lineId, apiBaseUri, token)
+        {
+            MeasurementWindows = windows
+        };
     }
 }

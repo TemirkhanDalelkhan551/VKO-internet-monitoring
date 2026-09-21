@@ -347,6 +347,72 @@ app.MapGet(
     .RequireRateLimiting("agent-read");
 
 app.MapPost(
+    "/api/devices/{deviceId:guid}/problem-reports",
+    async (
+        Guid deviceId,
+        VkoMonitoring.Api.Models.DeviceProblemReportRequest report,
+        HttpRequest request,
+        IDeviceAuthenticator authenticator,
+        IMonitoringReadRepository monitoringRepository,
+        IIncidentRepository incidentRepository,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) =>
+    {
+        if (!await authenticator.IsAuthorizedAsync(
+                report.SchoolId, deviceId, report.LineId,
+                request.Headers["X-Device-Token"].FirstOrDefault(), cancellationToken))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(report.Comment) || report.Comment.Length > 4_000)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(report.Comment)] = ["Введите описание проблемы длиной не более 4000 символов."]
+            });
+        }
+
+        var device = await monitoringRepository.GetDeviceAsync(deviceId, cancellationToken);
+        if (device is null) return Results.NotFound();
+        var facts = FormatDeviceReportFacts(device.LatestMeasurement);
+        var actor = $"agent:{deviceId:D}";
+        var text = $"Сообщение с компьютера: {report.Comment.Trim()}\n\nФактические показатели на момент обращения:\n{facts}";
+
+        var openIncidentId = await incidentRepository.GetOpenIncidentIdAsync(report.LineId, cancellationToken);
+        if (openIncidentId is not null)
+        {
+            await incidentRepository.AddCommentAsync(openIncidentId.Value,
+                new VkoMonitoring.Api.Models.IncidentCommentCreateRequest(text, actor), cancellationToken);
+            return Results.Ok(new VkoMonitoring.Api.Models.DeviceProblemReportResult(openIncidentId.Value, Created: false));
+        }
+
+        var result = await incidentRepository.CreateManualIncidentAsync(
+            new VkoMonitoring.Api.Models.ManualIncidentCreateRequest(
+                report.SchoolId, report.LineId, "Обращение с компьютера",
+                "Требуется проверка качества интернет-подключения", text,
+                device.LatestMeasurement?.MeasuredAtUtc ?? timeProvider.GetUtcNow(),
+                AssignedTo: null, actor, Comment: "Обращение отправлено из программы мониторинга."),
+            cancellationToken);
+        if (result.Outcome == ManualIncidentCreationOutcome.Created)
+            return Results.Created($"/api/incidents/{result.IncidentId}",
+                new VkoMonitoring.Api.Models.DeviceProblemReportResult(result.IncidentId!.Value, Created: true));
+
+        // A simultaneous automatic measurement can open an incident between the two calls.
+        openIncidentId = await incidentRepository.GetOpenIncidentIdAsync(report.LineId, cancellationToken);
+        if (openIncidentId is not null)
+        {
+            await incidentRepository.AddCommentAsync(openIncidentId.Value,
+                new VkoMonitoring.Api.Models.IncidentCommentCreateRequest(text, actor), cancellationToken);
+            return Results.Ok(new VkoMonitoring.Api.Models.DeviceProblemReportResult(openIncidentId.Value, Created: false));
+        }
+        return result.Outcome == ManualIncidentCreationOutcome.BindingNotFound
+            ? Results.NotFound()
+            : Results.Conflict(new { error = "Не удалось зарегистрировать обращение. Повторите попытку." });
+    })
+    .RequireRateLimiting("agent-write");
+
+app.MapPost(
     "/api/devices/register",
     async (
         VkoMonitoring.Api.Models.DeviceRegistrationRequest registration,
@@ -1302,3 +1368,19 @@ static async Task<IResult> CheckReadinessAsync(
 
 static bool IsValidLifecycleReason(string? reason) =>
     !string.IsNullOrWhiteSpace(reason) && reason.Trim().Length is >= 5 and <= 500;
+
+static string FormatDeviceReportFacts(VkoMonitoring.Api.Models.MeasurementSnapshot? measurement) =>
+    measurement is null
+        ? "Последнее измерение на сервере отсутствует."
+        : string.Join("\n",
+        [
+            $"Время: {measurement.MeasuredAtUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}",
+            $"Download: {FormatFact(measurement.DownloadMbps, "Мбит/с")}",
+            $"Upload: {FormatFact(measurement.UploadMbps, "Мбит/с")}",
+            $"Ping: {FormatFact(measurement.PingMilliseconds, "мс")}",
+            $"Jitter: {FormatFact(measurement.JitterMilliseconds, "мс")}",
+            $"Потери пакетов: {FormatFact(measurement.PacketLossPercent, "%")}"
+        ]);
+
+static string FormatFact(double? value, string unit) =>
+    value is null ? "нет данных" : $"{value.Value:0.##} {unit}";

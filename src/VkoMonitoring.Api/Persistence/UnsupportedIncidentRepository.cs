@@ -21,6 +21,9 @@ public sealed class UnsupportedIncidentRepository : IIncidentRepository
         CancellationToken cancellationToken) =>
         throw CreateException();
 
+    public Task<Guid?> GetOpenIncidentIdAsync(Guid lineId, CancellationToken cancellationToken) =>
+        throw CreateException();
+
     public Task<ManualIncidentCreationResult> CreateManualIncidentAsync(
         ManualIncidentCreateRequest request,
         CancellationToken cancellationToken) =>

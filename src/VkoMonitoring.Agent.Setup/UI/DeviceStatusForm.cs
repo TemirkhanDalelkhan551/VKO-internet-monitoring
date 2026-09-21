@@ -29,7 +29,9 @@ public sealed class DeviceStatusForm : Form
     private readonly Button refreshButton = new();
     private readonly Button measureNowButton = new();
     private readonly Button diagnosticsButton = new();
+    private readonly Button reportProblemButton = new();
     private readonly Button setupButton = new();
+    private readonly LocalTrendChart trendChart = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 60_000 };
     private CancellationTokenSource? refreshCancellation;
     private bool refreshInProgress;
@@ -65,6 +67,7 @@ public sealed class DeviceStatusForm : Form
         refreshButton.Click += async (_, _) => await RefreshStatusAsync();
         measureNowButton.Click += async (_, _) => await RequestMeasurementAsync();
         diagnosticsButton.Click += (_, _) => CopyDiagnostics();
+        reportProblemButton.Click += async (_, _) => await ReportProblemAsync();
         setupButton.Click += OpenSetup;
         Load += (_, _) => FitToWorkingArea();
         FormClosing += (_, _) =>
@@ -135,7 +138,7 @@ public sealed class DeviceStatusForm : Form
             AutoScroll = true
         };
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 144));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         content.Controls.Add(CreateSummaryPanel(), 0, 0);
@@ -197,7 +200,7 @@ public sealed class DeviceStatusForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 5,
-            RowCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty
         };
         for (var index = 0; index < 5; index++)
@@ -205,6 +208,7 @@ public sealed class DeviceStatusForm : Form
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
         }
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         panel.Controls.Add(CreateMetricCard("Download", downloadValue), 0, 0);
@@ -212,11 +216,24 @@ public sealed class DeviceStatusForm : Form
         panel.Controls.Add(CreateMetricCard("Ping", pingValue), 2, 0);
         panel.Controls.Add(CreateMetricCard("Jitter", jitterValue), 3, 0);
         panel.Controls.Add(CreateMetricCard("Потери", lossValue), 4, 0);
+        var trend = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2) };
+        trend.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Font = new Font("Segoe UI Semibold", 9F),
+            ForeColor = MutedColor,
+            Text = "Динамика Download и Ping — последние замеры"
+        });
+        trendChart.Dock = DockStyle.Fill;
+        trend.Controls.Add(trendChart);
+        panel.Controls.Add(trend, 0, 1);
+        panel.SetColumnSpan(trend, 5);
         measuredAt.ForeColor = MutedColor;
         measuredAt.AutoSize = false;
         measuredAt.Dock = DockStyle.Fill;
         measuredAt.TextAlign = ContentAlignment.MiddleLeft;
-        panel.Controls.Add(measuredAt, 0, 1);
+        panel.Controls.Add(measuredAt, 0, 2);
         panel.SetColumnSpan(measuredAt, 5);
         return panel;
     }
@@ -263,14 +280,22 @@ public sealed class DeviceStatusForm : Form
         measureNowButton.ForeColor = Color.White;
         diagnosticsButton.Text = "Скопировать диагностику";
         diagnosticsButton.Dock = DockStyle.Right;
-        diagnosticsButton.Width = 205;
+        diagnosticsButton.Width = 175;
         diagnosticsButton.Margin = new Padding(0, 0, 10, 0);
         diagnosticsButton.FlatStyle = FlatStyle.Flat;
         diagnosticsButton.FlatAppearance.BorderColor = Color.FromArgb(160, 173, 185);
         diagnosticsButton.ForeColor = Color.FromArgb(55, 75, 92);
+        reportProblemButton.Text = "Сообщить о проблеме";
+        reportProblemButton.Dock = DockStyle.Right;
+        reportProblemButton.Width = 175;
+        reportProblemButton.Margin = new Padding(0, 0, 10, 0);
+        reportProblemButton.FlatStyle = FlatStyle.Flat;
+        reportProblemButton.FlatAppearance.BorderColor = Color.FromArgb(183, 98, 0);
+        reportProblemButton.ForeColor = Color.FromArgb(148, 78, 0);
         panel.Controls.Add(refreshButton);
         panel.Controls.Add(measureNowButton);
         panel.Controls.Add(diagnosticsButton);
+        panel.Controls.Add(reportProblemButton);
         return panel;
     }
 
@@ -424,7 +449,10 @@ public sealed class DeviceStatusForm : Form
               $" · {FormatDuration(latestDetails?.DurationMilliseconds)}" +
               $" · {TranslateConnectionType(latestDetails?.NetworkConnectionType)}" +
               $" · сервер {latestDetails?.MeasurementServer ?? "—"}" +
-              $" · внешний IP {latestDetails?.ExternalIpAddress ?? "—"}";
+              $" · внешний IP {latestDetails?.ExternalIpAddress ?? "—"}" +
+              $" · {DescribeIssue(device.Status, measurement, latestDetails?.FailureReason)}" +
+              $" · {FormatNextMeasurement(view.MeasurementWindows)}";
+        trendChart.SetMeasurements(view.ServerStatus.RecentMeasurements);
 
         history.Rows.Clear();
         foreach (var item in view.ServerStatus.RecentMeasurements)
@@ -479,6 +507,38 @@ public sealed class DeviceStatusForm : Form
                 "Диагностика агента",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+    }
+
+    private async Task ReportProblemAsync()
+    {
+        if (lastView?.ServerStatus.Device.LatestMeasurement is null)
+        {
+            MessageBox.Show("Сначала дождитесь хотя бы одного измерения, чтобы приложить фактические показатели.",
+                "Нет измерений", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new ProblemReportDialog(lastView.ServerStatus.Device.LatestMeasurement);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        reportProblemButton.Enabled = false;
+        reportProblemButton.Text = "Отправляем…";
+        try
+        {
+            var result = await statusService.SubmitProblemReportAsync(dialog.Comment, CancellationToken.None);
+            MessageBox.Show(result.Created
+                    ? "Обращение зарегистрировано и передано в веб-панель со статусом «Новое». Оно не отправлялось провайдеру автоматически."
+                    : "По этой линии уже есть активный инцидент. Ваше обращение и фактические показатели добавлены в его журнал.",
+                "Обращение принято", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(exception.Message, "Не удалось отправить обращение", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            reportProblemButton.Enabled = true;
+            reportProblemButton.Text = "Сообщить о проблеме";
         }
     }
 
@@ -570,4 +630,143 @@ public sealed class DeviceStatusForm : Form
         "Critical" or "NoConnection" or "Offline" => Color.Firebrick,
         _ => MutedColor
     };
+
+    private static string DescribeIssue(string status, LocalMeasurementSnapshot measurement, string? failureReason)
+    {
+        if (!string.IsNullOrWhiteSpace(failureReason)) return $"Причина: {failureReason}";
+        return status switch
+        {
+            "Normal" or "Online" => "Причина: показатели в норме",
+            "NoConnection" or "Offline" => "Причина: нет соединения с интернетом",
+            "Critical" => "Причина: критичное отклонение одного или нескольких показателей",
+            "Unstable" or "Degraded" => "Причина: один или несколько показателей вне нормы",
+            _ => "Причина: ожидается анализ следующего измерения"
+        };
+    }
+
+    private static string FormatNextMeasurement(IEnumerable<string> windows)
+    {
+        var now = DateTime.Now;
+        var starts = windows.Select(window => window.Split('-', 2))
+            .Where(parts => parts.Length == 2 && TimeOnly.TryParse(parts[0], out _))
+            .Select(parts => TimeOnly.Parse(parts[0]))
+            .Select(time => now.Date.Add(time.ToTimeSpan()))
+            .Select(start => start > now ? start : start.AddDays(1))
+            .OrderBy(start => start)
+            .FirstOrDefault();
+        return starts == default
+            ? "Автопроверка: по расписанию службы"
+            : $"Следующая автопроверка: {starts:dd.MM HH:mm}";
+    }
+}
+
+internal sealed class ProblemReportDialog : Form
+{
+    private readonly TextBox comment = new() { Multiline = true, MaxLength = 4000, ScrollBars = ScrollBars.Vertical };
+    public string Comment => comment.Text.Trim();
+
+    public ProblemReportDialog(LocalMeasurementSnapshot measurement)
+    {
+        Text = "Сообщить о проблеме";
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(620, 330);
+        MinimumSize = new Size(520, 300);
+        Font = new Font("Segoe UI", 10F);
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 5 };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI Semibold", 12F), Text = "Обращение будет передано администратору" }, 0, 0);
+        layout.Controls.Add(new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(570, 0),
+            ForeColor = Color.FromArgb(83, 96, 110),
+            Text = $"К обращению будут приложены фактические показатели: Download {Metric(measurement.DownloadMbps, "Мбит/с")}, Ping {Metric(measurement.PingMilliseconds, "мс")}, Jitter {Metric(measurement.JitterMilliseconds, "мс")}, потери {Metric(measurement.PacketLossPercent, "%")}. Провайдеру оно автоматически не отправляется."
+        }, 0, 1);
+        comment.Dock = DockStyle.Fill;
+        comment.Margin = new Padding(0, 14, 0, 10);
+        comment.PlaceholderText = "Опишите, что наблюдаете: когда началась проблема, какие сервисы недоступны, что уже пробовали сделать…";
+        layout.Controls.Add(comment, 0, 2);
+        layout.Controls.Add(new Label { AutoSize = true, ForeColor = Color.FromArgb(83, 96, 110), Text = "Обращение появится в разделе «Инциденты» веб-панели." }, 0, 3);
+        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 10, 0, 0) };
+        var send = new Button { Text = "Отправить на рассмотрение", AutoSize = true };
+        var cancel = new Button { Text = "Отмена", AutoSize = true, DialogResult = DialogResult.Cancel };
+        send.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(Comment))
+            {
+                MessageBox.Show("Опишите проблему перед отправкой.", "Нужно описание", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            DialogResult = DialogResult.OK;
+            Close();
+        };
+        buttons.Controls.Add(send);
+        buttons.Controls.Add(cancel);
+        layout.Controls.Add(buttons, 0, 4);
+        Controls.Add(layout);
+        AcceptButton = send;
+        CancelButton = cancel;
+    }
+
+    private static string Metric(double? value, string unit) => value is null ? "—" : $"{value:0.##} {unit}";
+}
+
+internal sealed class LocalTrendChart : Control
+{
+    private IReadOnlyList<LocalMeasurement> values = [];
+
+    public LocalTrendChart()
+    {
+        DoubleBuffered = true;
+        BackColor = Color.White;
+    }
+
+    public void SetMeasurements(IReadOnlyList<LocalMeasurement> measurements)
+    {
+        values = measurements.Take(12).Reverse().ToArray();
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (values.Count < 2)
+        {
+            TextRenderer.DrawText(e.Graphics, "Нужно минимум два измерения для построения динамики", Font,
+                ClientRectangle, Color.FromArgb(110, 120, 130), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            return;
+        }
+        var area = Rectangle.Inflate(ClientRectangle, -6, -5);
+        var download = values.Select(value => value.DownloadMbps).ToArray();
+        var ping = values.Select(value => value.PingMilliseconds).ToArray();
+        DrawSeries(e.Graphics, area, download, Color.FromArgb(31, 122, 78));
+        DrawSeries(e.Graphics, area, ping, Color.FromArgb(27, 94, 163));
+        TextRenderer.DrawText(e.Graphics, "● Download", Font, new Point(area.Left, area.Top), Color.FromArgb(31, 122, 78));
+        TextRenderer.DrawText(e.Graphics, "● Ping", Font, new Point(area.Left + 95, area.Top), Color.FromArgb(27, 94, 163));
+    }
+
+    private static void DrawSeries(Graphics graphics, Rectangle area, IReadOnlyList<double?> series, Color color)
+    {
+        var points = series.Where(value => value is not null).Select(value => value!.Value).ToArray();
+        if (points.Length < 2) return;
+        var min = points.Min();
+        var range = Math.Max(0.01, points.Max() - min);
+        var drawArea = Rectangle.FromLTRB(area.Left, area.Top + 18, area.Right, area.Bottom);
+        using var pen = new Pen(color, 2F);
+        PointF? previous = null;
+        for (var index = 0; index < series.Count; index++)
+        {
+            if (series[index] is not double value) { previous = null; continue; }
+            var x = drawArea.Left + index * drawArea.Width / Math.Max(1, series.Count - 1);
+            var y = drawArea.Bottom - (float)((value - min) / range * drawArea.Height);
+            var current = new PointF(x, y);
+            if (previous is not null) graphics.DrawLine(pen, previous.Value, current);
+            previous = current;
+        }
+    }
 }

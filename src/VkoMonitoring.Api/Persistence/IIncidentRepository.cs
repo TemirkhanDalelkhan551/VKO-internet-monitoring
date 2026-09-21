@@ -16,6 +16,8 @@ public interface IIncidentRepository
 
     Task<IncidentDetails?> GetIncidentAsync(Guid incidentId, CancellationToken cancellationToken);
 
+    Task<Guid?> GetOpenIncidentIdAsync(Guid lineId, CancellationToken cancellationToken);
+
     Task<ManualIncidentCreationResult> CreateManualIncidentAsync(
         ManualIncidentCreateRequest request,
         CancellationToken cancellationToken);

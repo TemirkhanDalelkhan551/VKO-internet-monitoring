@@ -168,6 +168,22 @@ public sealed class PostgresIncidentRepository(
         return new IncidentDetails(incident, history);
     }
 
+    public async Task<Guid?> GetOpenIncidentIdAsync(Guid lineId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT id
+            FROM incidents
+            WHERE line_id = $1
+              AND status IN ('New', 'SentToProvider', 'InProgress', 'WaitingForInformation')
+            ORDER BY started_at_utc DESC
+            LIMIT 1;
+            """;
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue(lineId);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is Guid incidentId ? incidentId : null;
+    }
+
     public async Task<ManualIncidentCreationResult> CreateManualIncidentAsync(
         ManualIncidentCreateRequest request,
         CancellationToken cancellationToken)
