@@ -2,7 +2,17 @@ namespace VkoMonitoring.Agent.Setup.Status;
 
 public sealed record LocalDeviceStatusResponse(
     LocalDeviceOverview Device,
-    IReadOnlyList<LocalMeasurement> RecentMeasurements);
+    IReadOnlyList<LocalMeasurement> RecentMeasurements)
+{
+    public LocalQualityThresholds? QualityThresholds { get; init; }
+}
+
+public sealed record LocalQualityThresholds(
+    decimal MinimumDownloadMbps,
+    decimal MinimumUploadMbps,
+    decimal MaximumPingMilliseconds,
+    decimal MaximumJitterMilliseconds,
+    decimal MaximumPacketLossPercent);
 
 public sealed record LocalDeviceOverview(
     Guid DeviceId,

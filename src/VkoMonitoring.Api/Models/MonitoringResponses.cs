@@ -99,7 +99,17 @@ public sealed record LineOverview(
 
 public sealed record LocalDeviceStatus(
     DeviceOverview Device,
-    IReadOnlyList<VkoMonitoring.Agent.Core.Domain.InternetMeasurement> RecentMeasurements);
+    IReadOnlyList<VkoMonitoring.Agent.Core.Domain.InternetMeasurement> RecentMeasurements)
+{
+    public LocalQualityThresholds? QualityThresholds { get; init; }
+}
+
+public sealed record LocalQualityThresholds(
+    decimal MinimumDownloadMbps,
+    decimal MinimumUploadMbps,
+    decimal MaximumPingMilliseconds,
+    decimal MaximumJitterMilliseconds,
+    decimal MaximumPacketLossPercent);
 
 public sealed record AnalyticsOverview(
     DateTimeOffset FromUtc,

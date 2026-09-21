@@ -138,13 +138,13 @@ public sealed class DeviceStatusForm : Form
             AutoScroll = true
         };
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         content.Controls.Add(CreateSummaryPanel(), 0, 0);
         content.Controls.Add(CreateMetricsPanel(), 0, 1);
         content.Controls.Add(CreateHistoryHeader(), 0, 2);
-        content.Controls.Add(history, 0, 3);
+        content.Controls.Add(CreateHistoryAndChart(), 0, 3);
         return content;
     }
 
@@ -161,6 +161,8 @@ public sealed class DeviceStatusForm : Form
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
         AddSummary(panel, 0, "Состояние соединения", connectionState);
         AddSummary(panel, 1, "Служба Windows", serviceState);
@@ -200,7 +202,7 @@ public sealed class DeviceStatusForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 5,
-            RowCount = 3,
+            RowCount = 2,
             Margin = Padding.Empty
         };
         for (var index = 0; index < 5; index++)
@@ -208,7 +210,6 @@ public sealed class DeviceStatusForm : Form
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
         }
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         panel.Controls.Add(CreateMetricCard("Download", downloadValue), 0, 0);
@@ -216,7 +217,22 @@ public sealed class DeviceStatusForm : Form
         panel.Controls.Add(CreateMetricCard("Ping", pingValue), 2, 0);
         panel.Controls.Add(CreateMetricCard("Jitter", jitterValue), 3, 0);
         panel.Controls.Add(CreateMetricCard("Потери", lossValue), 4, 0);
-        var trend = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2) };
+        measuredAt.ForeColor = MutedColor;
+        measuredAt.AutoSize = false;
+        measuredAt.Dock = DockStyle.Fill;
+        measuredAt.TextAlign = ContentAlignment.MiddleLeft;
+        panel.Controls.Add(measuredAt, 0, 1);
+        panel.SetColumnSpan(measuredAt, 5);
+        return panel;
+    }
+
+    private Control CreateHistoryAndChart()
+    {
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 122));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.Controls.Add(history, 0, 0);
+        var trend = new Panel { Dock = DockStyle.Fill, BackColor = CardColor, Margin = new Padding(0, 14, 0, 0), Padding = new Padding(12, 8, 12, 8) };
         trendChart.Dock = DockStyle.Fill;
         trend.Controls.Add(trendChart);
         trend.Controls.Add(new Label
@@ -225,17 +241,10 @@ public sealed class DeviceStatusForm : Form
             Dock = DockStyle.Top,
             Font = new Font("Segoe UI Semibold", 9F),
             ForeColor = MutedColor,
-            Text = "Динамика Download и Ping — последние замеры"
+            Text = "Динамика за последние 24 часа · Download и Ping"
         });
-        panel.Controls.Add(trend, 0, 1);
-        panel.SetColumnSpan(trend, 5);
-        measuredAt.ForeColor = MutedColor;
-        measuredAt.AutoSize = false;
-        measuredAt.Dock = DockStyle.Fill;
-        measuredAt.TextAlign = ContentAlignment.MiddleLeft;
-        panel.Controls.Add(measuredAt, 0, 2);
-        panel.SetColumnSpan(measuredAt, 5);
-        return panel;
+        layout.Controls.Add(trend, 0, 1);
+        return layout;
     }
 
     private static Control CreateMetricCard(string title, Label value)
@@ -294,8 +303,9 @@ public sealed class DeviceStatusForm : Form
         diagnosticsButton.FlatAppearance.BorderColor = Color.FromArgb(160, 173, 185);
         diagnosticsButton.ForeColor = Color.FromArgb(55, 75, 92);
         reportProblemButton.Text = "Сообщить о проблеме";
-        reportProblemButton.Width = 190;
+        reportProblemButton.Width = 230;
         reportProblemButton.Height = 32;
+        reportProblemButton.Font = new Font("Segoe UI", 9F);
         reportProblemButton.Margin = new Padding(0, 0, 8, 0);
         reportProblemButton.FlatStyle = FlatStyle.Flat;
         reportProblemButton.FlatAppearance.BorderColor = Color.FromArgb(183, 98, 0);
@@ -438,21 +448,22 @@ public sealed class DeviceStatusForm : Form
         lastView = view;
         lastError = null;
         var device = view.ServerStatus.Device;
-        connectionState.Text = TranslateStatus(device.Status);
+        connectionState.Text = $"● {TranslateStatus(device.Status)}";
         connectionState.ForeColor = StatusColor(device.Status);
         serviceState.Text = view.IsServiceRunning ? "Работает" : "Остановлена";
         serviceState.ForeColor = view.IsServiceRunning ? Color.FromArgb(31, 122, 78) : Color.Firebrick;
         lastSeen.Text = FormatDate(device.LastSeenAtUtc);
         serverAddress.Text = view.ServerAddress.ToString();
-        deviceDetails.Text = $"{device.Name} · кабинет {device.Room ?? "не указан"} · {device.ConnectionType ?? "тип не указан"}";
-
         var measurement = device.LatestMeasurement;
+        var latestDetails = view.ServerStatus.RecentMeasurements.FirstOrDefault();
+        var issue = DescribeIssue(device.Status, measurement, latestDetails?.FailureReason, view.ServerStatus.QualityThresholds);
+        deviceDetails.Text = $"{issue} · {device.Name} · кабинет {device.Room ?? "не указан"}";
+
         downloadValue.Text = FormatMetric(measurement?.DownloadMbps, "Мбит/с");
         uploadValue.Text = FormatMetric(measurement?.UploadMbps, "Мбит/с");
         pingValue.Text = FormatMetric(measurement?.PingMilliseconds, "мс");
         jitterValue.Text = FormatMetric(measurement?.JitterMilliseconds, "мс");
         lossValue.Text = FormatMetric(measurement?.PacketLossPercent, "%");
-        var latestDetails = view.ServerStatus.RecentMeasurements.FirstOrDefault();
         measuredAt.Text = measurement is null
             ? "Данных измерения пока нет"
             : $"Последнее измерение: {measurement.MeasuredAtUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}" +
@@ -460,7 +471,6 @@ public sealed class DeviceStatusForm : Form
               $" · {TranslateConnectionType(latestDetails?.NetworkConnectionType)}" +
               $" · сервер {latestDetails?.MeasurementServer ?? "—"}" +
               $" · внешний IP {latestDetails?.ExternalIpAddress ?? "—"}" +
-              $" · {DescribeIssue(device.Status, measurement, latestDetails?.FailureReason)}" +
               $" · {FormatNextMeasurement(view.MeasurementWindows)}";
         trendChart.SetMeasurements(view.ServerStatus.RecentMeasurements);
 
@@ -641,9 +651,28 @@ public sealed class DeviceStatusForm : Form
         _ => MutedColor
     };
 
-    private static string DescribeIssue(string status, LocalMeasurementSnapshot measurement, string? failureReason)
+    private static string DescribeIssue(
+        string status,
+        LocalMeasurementSnapshot? measurement,
+        string? failureReason,
+        LocalQualityThresholds? thresholds)
     {
         if (!string.IsNullOrWhiteSpace(failureReason)) return $"Причина: {failureReason}";
+        if (measurement is not null && thresholds is not null)
+        {
+            var issues = new List<string>();
+            if (measurement.DownloadMbps < (double)thresholds.MinimumDownloadMbps)
+                issues.Add($"Download ниже порога ({FormatMetric(measurement.DownloadMbps, "Мбит/с")} при норме от {thresholds.MinimumDownloadMbps:0.##})");
+            if (measurement.UploadMbps < (double)thresholds.MinimumUploadMbps)
+                issues.Add($"Upload ниже порога ({FormatMetric(measurement.UploadMbps, "Мбит/с")} при норме от {thresholds.MinimumUploadMbps:0.##})");
+            if (measurement.PingMilliseconds > (double)thresholds.MaximumPingMilliseconds)
+                issues.Add($"Ping выше порога ({FormatMetric(measurement.PingMilliseconds, "мс")} при норме до {thresholds.MaximumPingMilliseconds:0.##})");
+            if (measurement.JitterMilliseconds > (double)thresholds.MaximumJitterMilliseconds)
+                issues.Add($"Jitter выше порога ({FormatMetric(measurement.JitterMilliseconds, "мс")} при норме до {thresholds.MaximumJitterMilliseconds:0.##})");
+            if (measurement.PacketLossPercent > (double)thresholds.MaximumPacketLossPercent)
+                issues.Add($"Потери выше порога ({FormatMetric(measurement.PacketLossPercent, "%")} при норме до {thresholds.MaximumPacketLossPercent:0.##}%)");
+            if (issues.Count > 0) return $"Причина: {string.Join("; ", issues)}";
+        }
         return status switch
         {
             "Normal" or "Online" => "Причина: показатели в норме",
@@ -664,9 +693,12 @@ public sealed class DeviceStatusForm : Form
             .Select(start => start > now ? start : start.AddDays(1))
             .OrderBy(start => start)
             .FirstOrDefault();
-        return starts == default
-            ? "Автопроверка: по расписанию службы"
-            : $"Следующая автопроверка: {starts:dd.MM HH:mm}";
+        if (starts == default) return "Автопроверка: по расписанию службы";
+        var remaining = starts - now;
+        var wait = remaining.TotalHours >= 1
+            ? $"через {(int)remaining.TotalHours} ч {remaining.Minutes} мин"
+            : $"через {Math.Max(1, remaining.Minutes)} мин";
+        return $"Следующая автопроверка {wait} ({starts:HH:mm})";
     }
 }
 

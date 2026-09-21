@@ -316,6 +316,7 @@ app.MapGet(
         HttpRequest request,
         IDeviceAuthenticator authenticator,
         IMonitoringReadRepository repository,
+        IOperationalSettingsRepository settingsRepository,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) =>
     {
@@ -342,7 +343,14 @@ app.MapGet(
             timeProvider.GetUtcNow().AddMinutes(1),
             20,
             cancellationToken);
-        return Results.Ok(new VkoMonitoring.Api.Models.LocalDeviceStatus(device, measurements));
+        var settings = await settingsRepository.GetAsync(cancellationToken);
+        return Results.Ok(new VkoMonitoring.Api.Models.LocalDeviceStatus(device, measurements)
+        {
+            QualityThresholds = new VkoMonitoring.Api.Models.LocalQualityThresholds(
+                settings.MinimumDownloadMbps, settings.MinimumUploadMbps,
+                settings.MaximumPingMilliseconds, settings.MaximumJitterMilliseconds,
+                settings.MaximumPacketLossPercent)
+        });
     })
     .RequireRateLimiting("agent-read");
 
