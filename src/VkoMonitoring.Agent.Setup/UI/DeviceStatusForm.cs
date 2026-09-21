@@ -139,7 +139,7 @@ public sealed class DeviceStatusForm : Form
         };
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         content.Controls.Add(CreateSummaryPanel(), 0, 0);
         content.Controls.Add(CreateMetricsPanel(), 0, 1);
@@ -217,6 +217,8 @@ public sealed class DeviceStatusForm : Form
         panel.Controls.Add(CreateMetricCard("Jitter", jitterValue), 3, 0);
         panel.Controls.Add(CreateMetricCard("Потери", lossValue), 4, 0);
         var trend = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2) };
+        trendChart.Dock = DockStyle.Fill;
+        trend.Controls.Add(trendChart);
         trend.Controls.Add(new Label
         {
             AutoSize = true,
@@ -225,8 +227,6 @@ public sealed class DeviceStatusForm : Form
             ForeColor = MutedColor,
             Text = "Динамика Download и Ping — последние замеры"
         });
-        trendChart.Dock = DockStyle.Fill;
-        trend.Controls.Add(trendChart);
         panel.Controls.Add(trend, 0, 1);
         panel.SetColumnSpan(trend, 5);
         measuredAt.ForeColor = MutedColor;
@@ -257,45 +257,55 @@ public sealed class DeviceStatusForm : Form
     private Control CreateHistoryHeader()
     {
         var panel = new Panel { Dock = DockStyle.Fill };
-        panel.Controls.Add(new Label
+        var title = new Label
         {
             AutoSize = true,
-            Dock = DockStyle.Left,
+            Dock = DockStyle.Top,
             Font = new Font("Segoe UI Semibold", 12F),
             Text = "Последние измерения"
-        });
+        };
+        var actions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 38,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = new Padding(0, 2, 0, 0)
+        };
         refreshButton.Text = "Обновить";
-        refreshButton.Dock = DockStyle.Right;
         refreshButton.Width = 120;
+        refreshButton.Height = 32;
         refreshButton.FlatStyle = FlatStyle.Flat;
         refreshButton.FlatAppearance.BorderColor = PrimaryColor;
         refreshButton.ForeColor = PrimaryColor;
         measureNowButton.Text = "Проверить интернет сейчас";
-        measureNowButton.Dock = DockStyle.Right;
         measureNowButton.Width = 215;
-        measureNowButton.Margin = new Padding(0, 0, 10, 0);
+        measureNowButton.Height = 32;
+        measureNowButton.Margin = new Padding(0, 0, 8, 0);
         measureNowButton.FlatStyle = FlatStyle.Flat;
         measureNowButton.FlatAppearance.BorderColor = PrimaryColor;
         measureNowButton.BackColor = PrimaryColor;
         measureNowButton.ForeColor = Color.White;
         diagnosticsButton.Text = "Скопировать диагностику";
-        diagnosticsButton.Dock = DockStyle.Right;
-        diagnosticsButton.Width = 175;
-        diagnosticsButton.Margin = new Padding(0, 0, 10, 0);
+        diagnosticsButton.Width = 185;
+        diagnosticsButton.Height = 32;
+        diagnosticsButton.Margin = new Padding(0, 0, 8, 0);
         diagnosticsButton.FlatStyle = FlatStyle.Flat;
         diagnosticsButton.FlatAppearance.BorderColor = Color.FromArgb(160, 173, 185);
         diagnosticsButton.ForeColor = Color.FromArgb(55, 75, 92);
         reportProblemButton.Text = "Сообщить о проблеме";
-        reportProblemButton.Dock = DockStyle.Right;
-        reportProblemButton.Width = 175;
-        reportProblemButton.Margin = new Padding(0, 0, 10, 0);
+        reportProblemButton.Width = 190;
+        reportProblemButton.Height = 32;
+        reportProblemButton.Margin = new Padding(0, 0, 8, 0);
         reportProblemButton.FlatStyle = FlatStyle.Flat;
         reportProblemButton.FlatAppearance.BorderColor = Color.FromArgb(183, 98, 0);
         reportProblemButton.ForeColor = Color.FromArgb(148, 78, 0);
-        panel.Controls.Add(refreshButton);
-        panel.Controls.Add(measureNowButton);
-        panel.Controls.Add(diagnosticsButton);
-        panel.Controls.Add(reportProblemButton);
+        actions.Controls.Add(reportProblemButton);
+        actions.Controls.Add(diagnosticsButton);
+        actions.Controls.Add(measureNowButton);
+        actions.Controls.Add(refreshButton);
+        panel.Controls.Add(actions);
+        panel.Controls.Add(title);
         return panel;
     }
 
