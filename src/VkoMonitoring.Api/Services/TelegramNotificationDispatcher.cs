@@ -10,6 +10,7 @@ namespace VkoMonitoring.Api.Services;
 public interface ITelegramNotificationDispatcher
 {
     bool TryEnqueue(IncidentNotificationEvent notification);
+    bool TryEnqueueTest();
 }
 
 /// <summary>
@@ -22,30 +23,51 @@ public sealed class TelegramNotificationDispatcher(
     TelegramNotificationOptions options,
     ILogger<TelegramNotificationDispatcher> logger) : BackgroundService, ITelegramNotificationDispatcher
 {
-    private readonly Channel<IncidentNotificationEvent> _queue = Channel.CreateBounded<IncidentNotificationEvent>(
+    private readonly Channel<TelegramNotificationJob> _queue = Channel.CreateBounded<TelegramNotificationJob>(
         new BoundedChannelOptions(100) { SingleReader = true, FullMode = BoundedChannelFullMode.DropWrite });
 
     public bool TryEnqueue(IncidentNotificationEvent notification)
     {
         if (!IsConfigured()) return true;
-        if (_queue.Writer.TryWrite(notification)) return true;
+        if (_queue.Writer.TryWrite(new TelegramNotificationJob(notification, false))) return true;
         logger.LogWarning("Telegram notification queue is full; incident {IncidentId} was not queued.", notification.IncidentId);
+        return false;
+    }
+
+    public bool TryEnqueueTest()
+    {
+        if (!IsConfigured())
+        {
+            logger.LogWarning("Telegram test notification was requested, but Telegram is not configured.");
+            return false;
+        }
+
+        if (_queue.Writer.TryWrite(new TelegramNotificationJob(null, true))) return true;
+        logger.LogWarning("Telegram notification queue is full; the test notification was not queued.");
         return false;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var notification in _queue.Reader.ReadAllAsync(stoppingToken))
+        await foreach (var job in _queue.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
+                if (job.IsTest)
+                {
+                    await DeliverTestAsync(stoppingToken);
+                    continue;
+                }
+
+                var notification = job.IncidentNotification!;
                 var incident = await incidents.GetIncidentAsync(notification.IncidentId, stoppingToken);
                 if (incident is not null) await DeliverAsync(incident.Incident, notification.Kind, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Telegram notification for incident {IncidentId} was not delivered.", notification.IncidentId);
+                logger.LogWarning(exception, "Telegram notification {NotificationKind} was not delivered for incident {IncidentId}.",
+                    job.IsTest ? "test" : "incident", job.IncidentNotification?.IncidentId);
             }
         }
     }
@@ -76,5 +98,29 @@ public sealed class TelegramNotificationDispatcher(
         }
     }
 
+    private async Task DeliverTestAsync(CancellationToken cancellationToken)
+    {
+        const string text = "✅ Тест Telegram-уведомлений\n\n" +
+            "Настройка Render активна. Это проверочное сообщение не создаёт замер, инцидент или изменение статистики.";
+        await DeliverTextAsync(text, cancellationToken);
+    }
+
+    private async Task DeliverTextAsync(string text, CancellationToken cancellationToken)
+    {
+        using var client = httpClientFactory.CreateClient("telegram-notifications");
+        foreach (var chatId in options.ChatIds.Where(static id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"bot{options.BotToken}/sendMessage")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { chat_id = chatId.Trim(), text }), Encoding.UTF8, "application/json")
+            };
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                logger.LogWarning("Telegram rejected a notification test: HTTP {StatusCode}.", (int)response.StatusCode);
+        }
+    }
+
     private bool IsConfigured() => options.Enabled && !string.IsNullOrWhiteSpace(options.BotToken) && options.ChatIds.Length > 0;
+
+    private sealed record TelegramNotificationJob(IncidentNotificationEvent? IncidentNotification, bool IsTest);
 }

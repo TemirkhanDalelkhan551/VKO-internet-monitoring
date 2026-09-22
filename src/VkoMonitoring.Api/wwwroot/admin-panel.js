@@ -173,7 +173,15 @@ export function createAdminPanel({ element, request, getSession, onUnauthorized 
   setting("minimumDownloadMbps", "Минимальный Download, Мбит/с"); setting("minimumUploadMbps", "Минимальный Upload, Мбит/с"); setting("maximumPingMilliseconds", "Максимальный Ping, мс", "1");
   setting("maximumJitterMilliseconds", "Максимальный Jitter, мс", "1"); setting("maximumPacketLossPercent", "Максимальные потери, %"); setting("minimumAvailabilityPercent", "Минимальная доступность, %");
   const saveSettings = element("button", "button primary", "Сохранить настройки"); saveSettings.type = "submit"; settingsForm.append(saveSettings);
-  settingsPanel.append(element("h3", "", "Расписание и пороги"), element("p", "section-note", "Новые пороги применяются к следующим замерам. Агенты получают расписание при очередной служебной связи."), settingsForm, settingsFeedback);
+  const telegramFeedback = element("p", "section-note"); telegramFeedback.setAttribute("role", "status");
+  const testTelegram = element("button", "button secondary", "Отправить тест Telegram"); testTelegram.type = "button";
+  testTelegram.addEventListener("click", async () => {
+    const session = getSession(); testTelegram.disabled = true; telegramFeedback.textContent = "Отправляем тест…";
+    try { await request("/api/notifications/telegram/test", { method: "POST", token: session.token }); telegramFeedback.textContent = "Тест поставлен в очередь. Проверьте Telegram в течение нескольких секунд."; }
+    catch (error) { if (error.status === 401) onUnauthorized(); else telegramFeedback.textContent = error.detail || "Не удалось отправить тест. Проверьте настройки Telegram на сервере."; }
+    finally { testTelegram.disabled = false; }
+  });
+  settingsPanel.append(element("h3", "", "Расписание и пороги"), element("p", "section-note", "Новые пороги применяются к следующим замерам. Агенты получают расписание при очередной служебной связи."), settingsForm, settingsFeedback, element("h3", "", "Уведомления Telegram"), element("p", "section-note", "Проверка не создаёт замер, инцидент или изменение статистики. Получателей настраивает администратор сервера."), testTelegram, telegramFeedback);
   async function loadSettings() {
     const session = getSession(); settingsFeedback.textContent = "Загрузка настроек…";
     try { const value = await request("/api/settings/operations", { token: session.token }); windows.value = value.measurementWindows.join("\n"); for (const [name, input] of Object.entries(settingInputs)) input.value = value[name]; settingsFeedback.textContent = value.updatedAtUtc ? `Последнее изменение: ${timestamp(value.updatedAtUtc)}.` : "Используются настройки по умолчанию."; }

@@ -321,6 +321,17 @@ app.MapPut("/api/settings/operations", async (
 })
     .RequireRateLimiting("admin-write");
 
+app.MapPost("/api/notifications/telegram/test", (HttpRequest request, ITelegramNotificationDispatcher dispatcher) =>
+{
+    if (MonitoringRequestAccess.From(request.HttpContext)?.User is { Role: not UserRole.Administrator })
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+    return dispatcher.TryEnqueueTest()
+        ? Results.Accepted("/api/notifications/telegram/test", new { queued = true })
+        : Results.Problem("Telegram-уведомления не настроены на сервере.", statusCode: StatusCodes.Status503ServiceUnavailable);
+})
+    .RequireRateLimiting("admin-write");
+
 app.MapGet(
     "/api/devices/{deviceId:guid}/status",
     async (
