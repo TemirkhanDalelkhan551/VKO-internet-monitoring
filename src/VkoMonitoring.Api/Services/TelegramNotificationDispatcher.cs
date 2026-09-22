@@ -88,7 +88,10 @@ public sealed class TelegramNotificationDispatcher(
         using var client = httpClientFactory.CreateClient("telegram-notifications");
         foreach (var chatId in options.ChatIds.Where(static id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"bot{options.BotToken}/sendMessage")
+            // A bot token contains a colon. Without a leading slash, Uri treats
+            // "bot<token>:..." as a URI scheme instead of resolving it against
+            // the named client's Telegram base address.
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/bot{options.BotToken.Trim()}/sendMessage")
             {
                 Content = new StringContent(JsonSerializer.Serialize(new { chat_id = chatId.Trim(), text }), Encoding.UTF8, "application/json")
             };
@@ -110,7 +113,7 @@ public sealed class TelegramNotificationDispatcher(
         using var client = httpClientFactory.CreateClient("telegram-notifications");
         foreach (var chatId in options.ChatIds.Where(static id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"bot{options.BotToken}/sendMessage")
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/bot{options.BotToken.Trim()}/sendMessage")
             {
                 Content = new StringContent(JsonSerializer.Serialize(new { chat_id = chatId.Trim(), text }), Encoding.UTF8, "application/json")
             };
