@@ -10,6 +10,7 @@ export function createSchoolMap({ element, openSchool, request, getSession, onUn
   const note = element("p", "map-note", "На карте — школы с подтверждёнными координатами. Цвет показывает оценку основной линии; связь с агентом указана отдельно.");
   const count = element("p", "result-count"); count.setAttribute("aria-live", "polite");
   const canvas = element("div", "school-map"); canvas.setAttribute("aria-label", "Карта расположения школ");
+  const loading = element("p", "map-note map-loading", "Загрузка карты…"); loading.setAttribute("role", "status");
   const error = element("p", "map-note"); error.setAttribute("role", "status"); error.hidden = true;
   const legend = element("div", "map-legend");
   for (const [status, [label]] of Object.entries(statuses)) {
@@ -28,7 +29,7 @@ export function createSchoolMap({ element, openSchool, request, getSession, onUn
   const notice = element("p", "map-note"); notice.setAttribute("role", "status");
   form.append(field("Школа", select), field("Широта", latitude), field("Долгота", longitude), save);
   editor.append(form, element("p", "map-note", "Введите точное положение школы. Чтобы убрать точку с карты, очистите оба поля и сохраните. Адреса автоматически не преобразуются в координаты."), notice);
-  host.append(header, note, count, canvas, error, legend, missing, editor);
+  host.append(header, note, count, loading, canvas, error, legend, missing, editor);
   let map, markers, config, configPromise, schools = [], allSchools = [], generation = 0, rendered = false, saving = false;
   function fitPoints() {
     if (!map) return;
@@ -77,6 +78,7 @@ export function createSchoolMap({ element, openSchool, request, getSession, onUn
   }
   async function render(filtered, available, user) {
     const currentGeneration = generation;
+    loading.hidden = false; canvas.setAttribute("aria-busy", "true");
     allSchools = available;
     const locations = splitLocations(filtered); schools = locations.located;
     count.textContent = `На карте: ${schools.length}. Без координат: ${locations.missing.length}. Фильтры общие с таблицей школ.`;
@@ -118,15 +120,16 @@ export function createSchoolMap({ element, openSchool, request, getSession, onUn
         marker.bindTooltip(element("span", "", school.name)).bindPopup(popup(school), { minWidth: 190, maxWidth: 300, maxHeight: 240 }).addTo(markers);
       }
       if (!rendered) { fitPoints(); rendered = true; }
+      loading.hidden = true; canvas.setAttribute("aria-busy", "false");
     } catch {
       if (currentGeneration !== generation) return;
-      configPromise = null; error.hidden = false; error.textContent = "Не удалось загрузить карту. Школы доступны в таблице ниже.";
+      configPromise = null; loading.hidden = true; canvas.setAttribute("aria-busy", "false"); error.hidden = false; error.textContent = "Не удалось загрузить карту. Школы доступны в таблице ниже.";
     }
   }
   function clear() {
     generation++; map?.remove(); map = null; markers = null; schools = []; allSchools = []; rendered = false; saving = false;
     missing.replaceChildren(); select.replaceChildren(); latitude.value = ""; longitude.value = ""; notice.textContent = "";
-    count.textContent = ""; error.hidden = true; editor.hidden = true;
+    count.textContent = ""; loading.hidden = true; canvas.setAttribute("aria-busy", "false"); error.hidden = true; editor.hidden = true;
   }
   return { render, clear };
 }

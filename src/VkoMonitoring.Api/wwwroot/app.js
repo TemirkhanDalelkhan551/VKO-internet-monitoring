@@ -114,7 +114,26 @@ function setActiveNavigation(id) {
     const active = node.id === id;
     node.classList.toggle("selected", active);
     if (active) node.setAttribute("aria-current", "page"); else node.removeAttribute("aria-current");
+    if (active) byId("mobile-section").textContent = node.textContent.trim();
   }
+}
+
+let mobileMenuOpener = null;
+function closeMobileNavigation(restoreFocus = false) {
+  const sidebar = byId("primary-navigation"), backdrop = byId("mobile-menu-backdrop"), opener = mobileMenuOpener;
+  sidebar.classList.remove("is-open"); backdrop.classList.remove("is-visible");
+  byId("open-mobile-menu").setAttribute("aria-expanded", "false");
+  byId("main-content").inert = false; document.body.classList.remove("menu-open");
+  mobileMenuOpener = null;
+  if (restoreFocus) opener?.focus();
+}
+function openMobileNavigation() {
+  if (!window.matchMedia("(max-width: 800px)").matches) return;
+  mobileMenuOpener = document.activeElement;
+  byId("primary-navigation").classList.add("is-open"); byId("mobile-menu-backdrop").classList.add("is-visible");
+  byId("open-mobile-menu").setAttribute("aria-expanded", "true");
+  byId("main-content").inert = true; document.body.classList.add("menu-open");
+  byId("close-mobile-menu").focus();
 }
 
 function statusCell(item) {
@@ -361,6 +380,21 @@ byId("logout").addEventListener("click", async () => {
   catch (error) { if (epoch === state.epoch && error.status !== 401) message("login-message", "Данные в этой вкладке очищены, но сервер не подтвердил выход. Проверьте соединение."); }
 });
 byId("refresh").addEventListener("click", refresh);
+byId("open-mobile-menu").addEventListener("click", openMobileNavigation);
+byId("close-mobile-menu").addEventListener("click", () => closeMobileNavigation(true));
+byId("mobile-menu-backdrop").addEventListener("click", () => closeMobileNavigation(true));
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") { closeMobileNavigation(true); return; }
+  if (event.key !== "Tab" || !byId("primary-navigation").classList.contains("is-open")) return;
+  const focusable = [...byId("primary-navigation").querySelectorAll("button:not([disabled]),a[href],input:not([disabled]),select:not([disabled])")]
+    .filter(node => !node.hidden && node.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+window.addEventListener("resize", () => { if (!window.matchMedia("(max-width: 800px)").matches) closeMobileNavigation(); });
+for (const node of document.querySelectorAll(".sidebar .nav-item")) node.addEventListener("click", () => closeMobileNavigation());
 byId("open-overview").addEventListener("click", () => {
   setActiveNavigation("open-overview");
   schoolPanel.clear();
