@@ -6,7 +6,7 @@ export function createNotificationPanel({ element, request, getSession, onUnauth
   let rows = [], userKey = "", generation = 0;
   const feedback = element("p", "section-note"); feedback.setAttribute("role", "status");
   const list = element("div", "notification-list"), markAll = element("button", "button secondary", "Отметить всё прочитанным"); markAll.type = "button";
-  host.append(element("h2", "", "Уведомления"), element("p", "section-note", "События проблем и восстановления по доступным вам линиям. Прочитанное хранится в этом браузере для текущей учётной записи."), markAll, feedback, list);
+  host.append(element("h2", "", "Уведомления"), element("p", "section-note", "Проблемы и восстановления по доступным линиям."), markAll, feedback, list);
   const storageKey = () => `vko-notifications-read:${userKey}`;
   function readSet() { try { return new Set(JSON.parse(localStorage.getItem(storageKey()) || "[]")); } catch { return new Set(); } }
   function save(set) { localStorage.setItem(storageKey(), JSON.stringify([...set].slice(-1000))); }

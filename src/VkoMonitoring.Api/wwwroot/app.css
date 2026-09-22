@@ -75,3 +75,37 @@ th{background:#f9fafb;color:#475467;font-size:11px;letter-spacing:.02em;border-c
 .directory-field input,.directory-field select,.incident-filters input,.incident-filters select,.incident-create input,.incident-create select,.incident-detail input,.incident-detail select,.incident-create textarea,.incident-detail textarea,.admin-field input,.admin-field select,.admin-field textarea{border-color:#d0d5dd;background:#fff;border-radius:8px}.admin-tabs .button{border-radius:8px}.admin-tab-panel,.activation-form,.activation-registry,.incident-detail,.report-settings{border-top-color:#eaecf0}
 @media(max-width:760px){body{font-size:14px;background:#f5f7fa}.sidebar{padding:15px 16px;background:#101828}.main{padding:24px 14px}.page-header h1{font-size:27px}.page-subtitle{font-size:13px}.summary-card{border-radius:8px;min-height:110px;padding:15px 14px}.summary-number{font-size:27px}.panel-heading,.map-heading{padding:18px 16px 14px}.filters{padding:14px 16px 2px}.result-count{padding:10px 16px 13px}.detail-section{padding:17px;border-radius:8px}.detail-section h2{font-size:18px}.chart-label{font-size:10px}.schools-panel{border-radius:8px}.sidebar>.nav-item{border-radius:6px;background:#1d2939;border-color:#344054}.sidebar>.nav-item.selected{background:#1d355b;border-color:#294e87}}
 @media(prefers-contrast:more){.button,.summary-card,.schools-panel,.detail-section,input,select,textarea{border-width:2px}.badge{outline:1px solid currentColor}}
+
+/* Operational UI refinements: preserve the existing product structure while
+   making health, recency and primary actions easier to scan. */
+.sidebar{width:236px;box-shadow:none}
+.nav-item{min-height:40px;padding:10px 12px;gap:0;border-radius:6px}
+.nav-item.selected{border-color:#315d9d;background:#1d355b;box-shadow:inset 3px 0 #b2ccff}
+.summary{gap:12px;margin-bottom:20px}
+.summary-card{min-height:108px;padding:17px 18px;border-radius:8px;box-shadow:none}
+.summary-card:hover{box-shadow:none}
+.summary-number{font-size:28px}
+.summary-card:first-child{background:#fff;border-color:var(--border)}
+.summary-critical{border-left:3px solid #b42318!important}
+.summary-warning{border-left:3px solid #b54708!important}
+.summary-healthy{border-left:3px solid #027a48!important}
+.summary-neutral{border-left:3px solid #98a2b3!important}
+.schools-panel,.detail-section{border-radius:8px;box-shadow:none}
+.line-card,.chart-card,.notification-card{border-radius:6px;box-shadow:none}
+.panel-heading p{max-width:680px}
+#schools-panel table{min-width:940px}
+#schools-panel th:nth-child(1){min-width:225px}
+#schools-panel th:nth-child(2){min-width:165px}
+#schools-panel th:nth-child(3){min-width:155px}
+#schools-panel th:nth-child(4){min-width:155px}
+#schools-panel th:nth-child(n+5),#schools-panel td:nth-child(n+5){color:#667085}
+#schools-panel td{padding-top:15px;padding-bottom:15px}
+#schools-panel .metric{font-size:13px;font-weight:600;color:#344054}
+.technical-id{display:block;margin-top:6px;color:#98a2b3;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+.text-button.destructive{color:#b42318}
+.text-button.destructive:hover{background:#fef3f2}
+.text-button.warning-action{color:#b54708}
+.text-button.warning-action:hover{background:#fffaeb}
+.freshness{margin-top:6px}
+@media(max-width:1100px){.sidebar{width:216px}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.main{padding-left:24px;padding-right:24px}}
+@media(max-width:760px){.sidebar{width:100%}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-card{min-height:104px;padding:14px}.summary-number{font-size:26px}.nav-item.selected{box-shadow:none}}

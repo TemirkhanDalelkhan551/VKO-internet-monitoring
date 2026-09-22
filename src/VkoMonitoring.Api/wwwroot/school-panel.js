@@ -1,4 +1,4 @@
-import { metric, timestamp, presenceLabels } from "./dashboard-model.js";
+import { metric, timestamp, measurementAge, presenceLabels } from "./dashboard-model.js";
 import { measurements, historyLimit, periodRange, periodQuery, chartData, dateValue } from "./history-model.js";
 
 export function createSchoolPanel({ request, getSession, onUnauthorized, onIncidents, element, badge, lineCard }) {
@@ -95,14 +95,16 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
     for (const device of devices) {
       const row = element("tr"), name = element("td"), status = element("td");
       name.append(element("strong", "", device.name), element("span", "secondary-text", device.room || "Помещение не указано"),
-        element("span", "secondary-text", `Device ID: ${device.deviceId}`));
+        element("span", "technical-id", `ID: ${device.deviceId}`));
       const line = school.lines.find(item => item.lineId === device.lineId);
       const lineCell = element("td"); lineCell.append(element("span", "", line?.name || "Линия не указана"), element("span", "secondary-text", line?.providerName || "Поставщик не указан"));
       status.append(badge(device.status), element("span", "secondary-text", presenceLabels[device.agentPresence] || "Связь неизвестна"));
       const action = element("td"); action.append(button("Показать замеры", () => {
         selectedDevice = device.deviceId; refresh();
       }, "text-button"));
-      row.append(name, lineCell, status, element("td", "", timestamp(device.lastSeenAtUtc)), element("td", "", device.agentVersion || "—"), action); body.append(row);
+      const lastSeen = element("td");
+      lastSeen.append(element("span", "", timestamp(device.lastSeenAtUtc)), element("span", "secondary-text", measurementAge(device.lastSeenAtUtc)));
+      row.append(name, lineCell, status, lastSeen, element("td", "", device.agentVersion || "—"), action); body.append(row);
     }
     table.append(head, body); scroll.append(table); node.append(scroll); return node;
   }
@@ -182,7 +184,7 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
     const node = section("История измерений", "Графики показывают отдельные замеры. Разрывы — отсутствующие показатели или потеря соединения; нулевые значения сохранены.");
     const label = element("label", "device-select-label", "Устройство для истории"); label.htmlFor = "history-device";
     const select = element("select", "history-device"); select.id = label.htmlFor;
-    for (const device of devices) { const option = element("option", "", `${device.name} · ${device.deviceId}`); option.value = device.deviceId; select.append(option); }
+    for (const device of devices) { const option = element("option", "", `${device.name}${device.room ? ` · ${device.room}` : ""}`); option.value = device.deviceId; select.append(option); }
     select.value = selectedDevice;
     select.addEventListener("change", () => { selectedDevice = select.value; refresh(); }); node.append(label, select);
     if (!devices.length || !rows.length) { node.append(element("p", "history-empty", "За выбранный период замеров нет.")); return node; }

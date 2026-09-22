@@ -109,6 +109,14 @@ function badge(status) {
   return element("span", `badge ${color}`, label);
 }
 
+function setActiveNavigation(id) {
+  for (const node of document.querySelectorAll(".nav-item")) {
+    const active = node.id === id;
+    node.classList.toggle("selected", active);
+    if (active) node.setAttribute("aria-current", "page"); else node.removeAttribute("aria-current");
+  }
+}
+
 function statusCell(item) {
   const cell = element("td");
   cell.append(badge(item.status));
@@ -179,8 +187,8 @@ function schoolRows(school) {
   const count = element("span", "device-count", String(school.activeDeviceCount));
   count.append(element("span", "total", ` / ${school.deviceCount}`));
   deviceCell.append(count, element("span", "secondary-text", "на связи / всего"));
-  row.append(schoolCell, lineCell, statusCell(school), metricCell(school.latestMeasurement?.downloadMbps, "Мбит/с"),
-    metricCell(school.latestMeasurement?.uploadMbps, "Мбит/с"), metricCell(school.latestMeasurement?.pingMilliseconds, "мс"), measuredCell, deviceCell);
+  row.append(schoolCell, statusCell(school), measuredCell, lineCell, metricCell(school.latestMeasurement?.downloadMbps, "Мбит/с"),
+    metricCell(school.latestMeasurement?.uploadMbps, "Мбит/с"), metricCell(school.latestMeasurement?.pingMilliseconds, "мс"), deviceCell);
   const details = element("tr", "line-details");
   details.id = `lines-${school.schoolId}`;
   details.hidden = !state.expanded.has(school.schoolId);
@@ -194,12 +202,13 @@ function schoolRows(school) {
 
 function renderSummary() {
   const totals = summarize(state.schools);
-  const cards = [["Организации образования", totals.schools, "В вашей области доступа"],
-    ["Устройства на связи", `${totals.activeDevices} / ${totals.devices}`, "Активные / зарегистрированные"],
-    ["Линии с проблемами", totals.problemLines, "По актуальным замерам"],
-    ["Без актуальных замеров", totals.missingLines, "Устаревшие или отсутствующие"]];
-  byId("summary").replaceChildren(...cards.map(([label, count, note]) => {
+  const cards = [["Линии с проблемами", totals.problemLines, "По актуальным замерам", totals.problemLines ? "critical" : "healthy"],
+    ["Без актуальных замеров", totals.missingLines, "Устаревшие или отсутствующие", totals.missingLines ? "warning" : "healthy"],
+    ["Устройства на связи", `${totals.activeDevices} / ${totals.devices}`, "Активные / зарегистрированные", "neutral"],
+    ["Организации образования", totals.schools, "В вашей области доступа", "neutral"]];
+  byId("summary").replaceChildren(...cards.map(([label, count, note, tone]) => {
     const card = element("article", "summary-card");
+    card.classList.add(`summary-${tone}`);
     card.append(element("p", "summary-label", label), element("p", "summary-number", state.loaded ? String(count) : "—"), element("p", "summary-note", note));
     return card;
   }));
@@ -352,10 +361,16 @@ byId("logout").addEventListener("click", async () => {
   catch (error) { if (epoch === state.epoch && error.status !== 401) message("login-message", "Данные в этой вкладке очищены, но сервер не подтвердил выход. Проверьте соединение."); }
 });
 byId("refresh").addEventListener("click", refresh);
-byId("open-incidents").addEventListener("click", () => { schoolPanel.clear(); ratingPanel.clear(); document.title = "Школы и линии · Мониторинг интернета ВКО"; incidentPanel.showSchool(""); });
-byId("open-ratings").addEventListener("click", () => { schoolPanel.clear(); incidentPanel.clear(); document.title = "Рейтинг качества · Мониторинг интернета ВКО"; ratingPanel.open(); });
-byId("open-admin").addEventListener("click", () => adminPanel.open());
-byId("open-notifications").addEventListener("click", () => notificationPanel.open());
+byId("open-overview").addEventListener("click", () => {
+  setActiveNavigation("open-overview");
+  schoolPanel.clear();
+  document.title = "Школы и линии · Мониторинг интернета ВКО";
+  byId("schools-panel").scrollIntoView({ block: "start" });
+});
+byId("open-incidents").addEventListener("click", () => { setActiveNavigation("open-incidents"); schoolPanel.clear(); ratingPanel.clear(); document.title = "Инциденты · Мониторинг интернета ВКО"; incidentPanel.showSchool(""); });
+byId("open-ratings").addEventListener("click", () => { setActiveNavigation("open-ratings"); schoolPanel.clear(); incidentPanel.clear(); document.title = "Рейтинг качества · Мониторинг интернета ВКО"; ratingPanel.open(); });
+byId("open-admin").addEventListener("click", () => { setActiveNavigation("open-admin"); adminPanel.open(); });
+byId("open-notifications").addEventListener("click", () => { setActiveNavigation("open-notifications"); notificationPanel.open(); });
 for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).addEventListener(id === "search" ? "input" : "change", renderSchools);
 byId("reset-filters").addEventListener("click", () => { for (const id of ["search", "district-filter", "status-filter", "provider-filter", "connection-filter"]) byId(id).value = ""; renderSchools(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60000);
