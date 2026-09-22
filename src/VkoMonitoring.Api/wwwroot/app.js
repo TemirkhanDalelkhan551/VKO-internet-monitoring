@@ -119,20 +119,25 @@ function setActiveNavigation(id) {
 }
 
 let mobileMenuOpener = null;
-function closeMobileNavigation(restoreFocus = false) {
+let mobileMenuScrollY = 0;
+function closeMobileNavigation(restoreFocus = false, restoreScroll = true) {
   const sidebar = byId("primary-navigation"), backdrop = byId("mobile-menu-backdrop"), opener = mobileMenuOpener;
+  const wasOpen = sidebar.classList.contains("is-open");
   sidebar.classList.remove("is-open"); backdrop.classList.remove("is-visible");
   byId("open-mobile-menu").setAttribute("aria-expanded", "false");
   byId("main-content").inert = false; document.body.classList.remove("menu-open");
+  document.body.style.removeProperty("--mobile-scroll-offset");
+  if (wasOpen && restoreScroll) requestAnimationFrame(() => window.scrollTo(0, mobileMenuScrollY));
   mobileMenuOpener = null;
   if (restoreFocus) opener?.focus();
 }
 function openMobileNavigation() {
   if (!window.matchMedia("(max-width: 800px)").matches) return;
   mobileMenuOpener = document.activeElement;
+  mobileMenuScrollY = window.scrollY;
   byId("primary-navigation").classList.add("is-open"); byId("mobile-menu-backdrop").classList.add("is-visible");
   byId("open-mobile-menu").setAttribute("aria-expanded", "true");
-  byId("main-content").inert = true; document.body.classList.add("menu-open");
+  byId("main-content").inert = true; document.body.style.setProperty("--mobile-scroll-offset", `-${mobileMenuScrollY}px`); document.body.classList.add("menu-open");
   byId("close-mobile-menu").focus();
 }
 
@@ -394,7 +399,7 @@ document.addEventListener("keydown", event => {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 });
 window.addEventListener("resize", () => { if (!window.matchMedia("(max-width: 800px)").matches) closeMobileNavigation(); });
-for (const node of document.querySelectorAll(".sidebar .nav-item")) node.addEventListener("click", () => closeMobileNavigation());
+for (const node of document.querySelectorAll(".sidebar .nav-item")) node.addEventListener("click", () => closeMobileNavigation(false, false));
 byId("open-overview").addEventListener("click", () => {
   setActiveNavigation("open-overview");
   schoolPanel.clear();

@@ -113,10 +113,10 @@ th{background:#f9fafb;color:#475467;font-size:11px;letter-spacing:.02em;border-c
 /* Mobile navigation and layout: the desktop sidebar becomes an off-canvas drawer. */
 .mobile-header,.drawer-close,.menu-backdrop{display:none}
 @media(max-width:800px){
-  html,body{max-width:100%;overflow-x:hidden}
-  body.menu-open{overflow:hidden}
+  html,body{max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%}
+  body.menu-open{position:fixed;top:var(--mobile-scroll-offset,0);left:0;width:100%;overflow:hidden;touch-action:none}
   .dashboard{display:block;min-height:100dvh}
-  .sidebar{position:fixed;z-index:100;inset:0 auto 0 0;width:min(320px,calc(100vw - 44px));height:100dvh;padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);overflow-y:auto;transform:translateX(-105%);transition:transform .18s ease;display:flex;flex-direction:column;flex-wrap:nowrap;background:#101828}
+  .sidebar{position:fixed;z-index:100;inset:0 auto 0 0;width:min(320px,calc(100vw - 44px));height:100vh;min-height:-webkit-fill-available;height:100dvh;padding:calc(env(safe-area-inset-top) + 16px) max(16px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 16px) max(16px,env(safe-area-inset-left));overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateX(-105%);transition:transform .18s ease;display:flex;flex-direction:column;flex-wrap:nowrap;background:#101828}
   .sidebar.is-open{transform:translateX(0)}
   .drawer-close{display:inline-flex;align-items:center;justify-content:center;align-self:flex-end;min-height:44px;padding:0 10px;border:0;background:transparent;color:#d0d5dd;font:inherit;font-size:13px}
   .menu-backdrop{position:fixed;z-index:90;inset:0;width:100%;height:100%;border:0;background:rgba(16,24,40,.52)}
@@ -129,7 +129,7 @@ th{background:#f9fafb;color:#475467;font-size:11px;letter-spacing:.02em;border-c
   .sidebar-bottom .account{display:flex;margin-top:14px}
   .sidebar-bottom .account .avatar{display:grid}
   .logout{display:flex;width:100%;min-height:44px;margin-top:12px;padding:10px 0;font-size:13px}
-  .main{width:100%;max-width:none;padding:0 16px calc(env(safe-area-inset-bottom) + 24px)}
+  .main{width:100%;max-width:none;padding:0 max(16px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 24px) max(16px,env(safe-area-inset-left))}
   .mobile-header{display:flex;min-height:58px;margin:0 -16px 16px;padding:calc(env(safe-area-inset-top) + 9px) 16px 9px;align-items:center;gap:12px;border-bottom:1px solid #eaecf0;background:#fff}
   .mobile-header>div{display:grid;gap:2px;min-width:0;font-size:12px;color:#667085}.mobile-header strong{color:#101828;font-size:13px}.mobile-header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .mobile-menu-button{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:8px 10px;border:1px solid #d0d5dd;border-radius:7px;background:#fff;color:#344054;font:inherit;font-size:13px;font-weight:600}
@@ -137,13 +137,18 @@ th{background:#f9fafb;color:#475467;font-size:11px;letter-spacing:.02em;border-c
   .page-header{display:block;margin-bottom:18px}.breadcrumb{margin-bottom:8px;font-size:11px;white-space:normal}.page-header h1{font-size:clamp(24px,7vw,29px);line-height:1.2}.page-subtitle{font-size:13px;line-height:1.5}.refresh-area{align-items:flex-start;flex-direction:column-reverse;gap:9px;margin-top:14px}.updated-at{font-size:12px;text-align:left;max-width:none}
   .summary{grid-template-columns:1fr;gap:10px;margin-bottom:16px}.summary-card{min-height:auto;padding:16px}.summary-number{font-size:29px}
   .schools-panel,.detail-section{border-radius:8px}.panel-heading,.map-heading{padding:18px 16px 14px}.panel-heading h2,.map-heading h2{font-size:18px}.panel-heading p{font-size:13px}.filters{padding:14px 16px 2px;display:grid;grid-template-columns:1fr;gap:10px}.filters>div,.filters select,.search-field{width:100%;min-width:0}.search-field input{font-size:16px}.result-count{padding:10px 16px 13px}.panel-footer{padding:14px 16px;gap:8px}.auto-update{margin-left:0}
+  /* iOS Safari enlarges a page when a form control has a font below 16px. */
+  input,select,textarea{font-size:16px!important}
   .table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}.table-scroll table{min-width:760px}.detail-section .table-scroll table,.admin-tab-panel table{min-width:720px}#schools-panel table{min-width:760px}
   .detail-header{display:block;margin-bottom:16px}.detail-header h1{font-size:clamp(23px,7vw,28px)}.detail-header .refresh-area{margin-top:12px}.detail-period{display:grid;grid-template-columns:1fr;gap:10px;padding:15px}.detail-period select,.detail-period input,.history-device{width:100%;min-height:44px;font-size:16px}.detail-dates{display:grid;grid-template-columns:1fr;gap:10px}.detail-dates input{max-width:none!important}
   .analytics-grid,.charts-grid,.line-grid{grid-template-columns:1fr;gap:10px}.chart-card{padding:12px}.chart-card svg{width:100%;height:auto;max-width:100%}.chart-label{font-size:10px}.technical-id{overflow-wrap:anywhere}.line-metrics{gap:12px}.line-foot{gap:7px 11px}
-  .school-map{height:300px;min-height:300px;margin:0 12px 12px}.map-loading{margin:0 16px 12px}.map-heading{display:block}.map-heading .text-button{margin-top:8px}.map-location-form{grid-template-columns:1fr}.map-location-form>label,.map-location-form>button{grid-column:auto}.map-location-form input,.map-location-form select{min-height:44px;font-size:16px}
+  .school-map{height:300px;min-height:300px;margin:0 12px 12px;touch-action:pan-x pan-y}.map-loading{margin:0 16px 12px}.map-heading{display:block}.map-heading .text-button{margin-top:8px}.map-location-form{grid-template-columns:1fr}.map-location-form>label,.map-location-form>button{grid-column:auto}.map-location-form input,.map-location-form select{min-height:44px;font-size:16px}
   .directory-grid,.admin-form{grid-template-columns:1fr}.incident-filters,.admin-filters{display:grid;grid-template-columns:1fr;gap:10px}.incident-filters>label,.admin-filters .admin-field{width:100%;min-width:0}.incident-filters input,.incident-filters select,.incident-create input,.incident-create select,.incident-create textarea,.incident-detail input,.incident-detail select,.incident-detail textarea,.admin-field input,.admin-field select,.admin-field textarea{min-height:44px;font-size:16px}
-  .admin-tabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.admin-tabs .button{flex:0 0 auto;min-height:44px}.admin-dialog{width:calc(100vw - 24px);max-width:none;max-height:calc(100dvh - 24px);overflow:auto;padding:18px;border-radius:8px}.admin-dialog .admin-form{grid-template-columns:1fr}.activation-result input{font-size:14px;overflow-wrap:anywhere}
+  .admin-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}.admin-tabs .button{flex:0 0 auto;min-height:44px}.admin-dialog{width:calc(100vw - 24px);max-width:none;max-height:calc(100dvh - 24px);overflow:auto;-webkit-overflow-scrolling:touch;padding:18px 18px max(18px,env(safe-area-inset-bottom));border-radius:8px}.admin-dialog .admin-form{grid-template-columns:1fr}.activation-result input{font-size:14px;overflow-wrap:anywhere}
   .button,.text-button{min-height:44px}.text-button{padding:10px}.page-footer{padding-bottom:calc(env(safe-area-inset-bottom) + 8px)}
+}
+@supports (-webkit-touch-callout:none){
+  @media(max-width:800px){.mobile-header{padding-top:max(9px,env(safe-area-inset-top));}.school-map .leaflet-control-zoom a{min-width:36px;min-height:36px;line-height:36px}}
 }
 @media(min-width:601px) and (max-width:800px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.main{padding-left:20px;padding-right:20px}.mobile-header{margin-left:-20px;margin-right:-20px;padding-left:20px;padding-right:20px}}
 @media(max-width:800px) and (orientation:landscape) and (max-height:520px){.sidebar{padding-top:10px;padding-bottom:10px}.sidebar .nav-label{margin-top:10px}.sidebar-bottom{margin-top:10px}.sidebar-bottom .nav-label,.access-description,.account{display:none!important}}
