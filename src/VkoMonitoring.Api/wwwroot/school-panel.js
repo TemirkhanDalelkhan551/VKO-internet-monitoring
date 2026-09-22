@@ -99,9 +99,7 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
       const line = school.lines.find(item => item.lineId === device.lineId);
       const lineCell = element("td"); lineCell.append(element("span", "", line?.name || "Линия не указана"), element("span", "secondary-text", line?.providerName || "Поставщик не указан"));
       status.append(badge(device.status), element("span", "secondary-text", presenceLabels[device.agentPresence] || "Связь неизвестна"));
-      const action = element("td"); action.append(button("Показать замеры", () => {
-        selectedDevice = device.deviceId; refresh();
-      }, "text-button"));
+      const action = element("td"); action.append(button("Показать замеры", () => openDeviceHistory(device.deviceId), "text-button"));
       const lastSeen = element("td");
       lastSeen.append(element("span", "", timestamp(device.lastSeenAtUtc)), element("span", "secondary-text", measurementAge(device.lastSeenAtUtc)));
       row.append(name, lineCell, status, lastSeen, element("td", "", device.agentVersion || "—"), action); body.append(row);
@@ -182,6 +180,8 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
   }
   function historyView(rows, devices) {
     const node = section("История измерений", "Графики показывают отдельные замеры. Разрывы — отсутствующие показатели или потеря соединения; нулевые значения сохранены.");
+    node.id = "measurement-history";
+    node.tabIndex = -1;
     const label = element("label", "device-select-label", "Устройство для истории"); label.htmlFor = "history-device";
     const select = element("select", "history-device"); select.id = label.htmlFor;
     for (const device of devices) { const option = element("option", "", `${device.name}${device.room ? ` · ${device.room}` : ""}`); option.value = device.deviceId; select.append(option); }
@@ -201,6 +201,13 @@ export function createSchoolPanel({ request, getSession, onUnauthorized, onIncid
       if (row.failureReason) status.append(element("span", "secondary-text", row.failureReason)); tr.append(status); body.append(tr);
     }
     table.append(head, body); scroll.append(table); node.append(scroll); return node;
+  }
+  async function openDeviceHistory(deviceId) {
+    selectedDevice = deviceId;
+    await refresh();
+    const history = document.getElementById("measurement-history");
+    history?.scrollIntoView({ behavior: "smooth", block: "start" });
+    history?.querySelector("#history-device")?.focus({ preventScroll: true });
   }
   async function refresh() {
     if (!schoolId) return;
