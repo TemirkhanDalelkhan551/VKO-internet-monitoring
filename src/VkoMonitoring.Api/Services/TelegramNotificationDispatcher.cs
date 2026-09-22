@@ -75,12 +75,16 @@ public sealed class TelegramNotificationDispatcher(
     private async Task DeliverAsync(IncidentOverview incident, IncidentNotificationKind kind, CancellationToken cancellationToken)
     {
         var emoji = kind == IncidentNotificationKind.Opened ? "🔴" : "🟢";
-        var heading = kind == IncidentNotificationKind.Opened ? "Новый инцидент" : "Связь восстановлена";
+        var isManual = incident.Source == IncidentSource.Manual;
+        var heading = kind == IncidentNotificationKind.Opened
+            ? isManual ? "Новый инцидент (создан вручную)" : "Новый инцидент"
+            : "Связь восстановлена";
         var occurred = kind == IncidentNotificationKind.Opened ? incident.DetectedAtUtc : incident.RecoveredAtUtc ?? incident.ClosedAtUtc ?? incident.DetectedAtUtc;
         var text = $"{emoji} {heading}\n\n" +
             $"Школа: {incident.SchoolName}\n" +
             $"Линия: {incident.LineName}\n" +
             $"Инцидент: {incident.IncidentNumber}\n" +
+            $"Источник: {(isManual ? "ручное обращение" : "автоматический мониторинг")}\n" +
             $"Причина: {incident.Description}\n" +
             $"Время: {occurred:dd.MM.yyyy HH:mm} UTC\n\n" +
             $"Подробнее: {options.PublicAppUrl.TrimEnd('/')}";

@@ -430,6 +430,7 @@ app.MapPost(
         IDeviceAuthenticator authenticator,
         IMonitoringReadRepository monitoringRepository,
         IIncidentRepository incidentRepository,
+        ITelegramNotificationDispatcher telegramNotifications,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) =>
     {
@@ -470,8 +471,12 @@ app.MapPost(
                 AssignedTo: null, actor, Comment: "Обращение отправлено из программы мониторинга."),
             cancellationToken);
         if (result.Outcome == ManualIncidentCreationOutcome.Created)
+        {
+            telegramNotifications.TryEnqueue(new IncidentNotificationEvent(
+                result.IncidentId!.Value, IncidentNotificationKind.Opened));
             return Results.Created($"/api/incidents/{result.IncidentId}",
                 new VkoMonitoring.Api.Models.DeviceProblemReportResult(result.IncidentId!.Value, Created: true));
+        }
 
         // A simultaneous automatic measurement can open an incident between the two calls.
         openIncidentId = await incidentRepository.GetOpenIncidentIdAsync(report.LineId, cancellationToken);
@@ -1078,6 +1083,7 @@ app.MapPost(
         HttpRequest request,
         TokenValidator tokenValidator,
         IIncidentRepository repository,
+        ITelegramNotificationDispatcher telegramNotifications,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) =>
     {
@@ -1103,6 +1109,11 @@ app.MapPost(
         }
 
         var result = await repository.CreateManualIncidentAsync(incident, cancellationToken);
+        if (result.Outcome == ManualIncidentCreationOutcome.Created)
+        {
+            telegramNotifications.TryEnqueue(new IncidentNotificationEvent(
+                result.IncidentId!.Value, IncidentNotificationKind.Opened));
+        }
         return result.Outcome switch
         {
             ManualIncidentCreationOutcome.Created => Results.Created(
