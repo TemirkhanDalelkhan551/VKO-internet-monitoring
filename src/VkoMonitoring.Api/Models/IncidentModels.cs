@@ -20,6 +20,10 @@ public enum IncidentSource
     Manual
 }
 
+public enum IncidentNotificationKind { Opened, Recovered }
+
+public sealed record IncidentNotificationEvent(Guid IncidentId, IncidentNotificationKind Kind);
+
 public sealed record IncidentOverview(
     Guid IncidentId,
     string IncidentNumber,

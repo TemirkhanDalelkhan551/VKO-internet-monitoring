@@ -34,6 +34,9 @@ var options = builder.Configuration
 var appealDraftOptions = builder.Configuration
     .GetSection(OpenAiAppealDraftOptions.SectionName)
     .Get<OpenAiAppealDraftOptions>() ?? new OpenAiAppealDraftOptions();
+var telegramNotificationOptions = builder.Configuration
+    .GetSection(TelegramNotificationOptions.SectionName)
+    .Get<TelegramNotificationOptions>() ?? new TelegramNotificationOptions();
 
 var postgresConnectionString = PostgresConnectionStringResolver.Resolve(
     builder.Configuration.GetConnectionString("MonitoringDatabase"));
@@ -41,11 +44,20 @@ MonitoringApiOptionsValidator.Validate(options, postgresConnectionString);
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(appealDraftOptions);
+builder.Services.AddSingleton(telegramNotificationOptions);
 builder.Services.AddHttpClient<IAppealDraftGenerator, OpenAiAppealDraftGenerator>(client =>
 {
     client.BaseAddress = new Uri(appealDraftOptions.BaseUrl, UriKind.Absolute);
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(appealDraftOptions.TimeoutSeconds, 5, 60));
 });
+builder.Services.AddHttpClient("telegram-notifications", client =>
+{
+    client.BaseAddress = new Uri("https://api.telegram.org/");
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(telegramNotificationOptions.TimeoutSeconds, 3, 30));
+});
+builder.Services.AddSingleton<TelegramNotificationDispatcher>();
+builder.Services.AddSingleton<ITelegramNotificationDispatcher>(provider => provider.GetRequiredService<TelegramNotificationDispatcher>());
+builder.Services.AddHostedService(provider => provider.GetRequiredService<TelegramNotificationDispatcher>());
 builder.Services.AddScoped<RatingService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<MonitoringAccessContext>();
@@ -938,9 +950,14 @@ app.MapPost(
                 .ToString()
         };
         var wasCreated = await repository.AddIfNotExistsAsync(serverObservedMeasurement, cancellationToken);
-        await incidentRepository.ProcessLatestMeasurementAsync(
+        var incidentNotification = await incidentRepository.ProcessLatestMeasurementAsync(
             serverObservedMeasurement.LineId,
             cancellationToken);
+        if (incidentNotification is not null)
+        {
+            request.HttpContext.RequestServices.GetRequiredService<ITelegramNotificationDispatcher>()
+                .TryEnqueue(incidentNotification);
+        }
         await presenceRepository.RecordHeartbeatAsync(
             new AgentHeartbeat(
                 measurement.SchoolId,

@@ -4,7 +4,7 @@ namespace VkoMonitoring.Api.Persistence;
 
 public interface IIncidentRepository
 {
-    Task ProcessLatestMeasurementAsync(Guid lineId, CancellationToken cancellationToken);
+    Task<IncidentNotificationEvent?> ProcessLatestMeasurementAsync(Guid lineId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<IncidentOverview>> GetIncidentsAsync(
         Guid? schoolId,

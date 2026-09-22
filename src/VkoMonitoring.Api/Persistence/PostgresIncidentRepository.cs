@@ -15,7 +15,7 @@ public sealed class PostgresIncidentRepository(
     TimeProvider timeProvider,
     MonitoringAccessContext access) : IIncidentRepository
 {
-    public async Task ProcessLatestMeasurementAsync(
+    public async Task<IncidentNotificationEvent?> ProcessLatestMeasurementAsync(
         Guid lineId,
         CancellationToken cancellationToken)
     {
@@ -27,7 +27,7 @@ public sealed class PostgresIncidentRepository(
         if (signals.Count == 0)
         {
             await transaction.CommitAsync(cancellationToken);
-            return;
+            return null;
         }
 
         var openIncident = await GetOpenIncidentAsync(connection, transaction, lineId, cancellationToken);
@@ -36,13 +36,14 @@ public sealed class PostgresIncidentRepository(
             openIncident is not null,
             options.Incidents);
 
+        IncidentNotificationEvent? notification = null;
         if (transition == IncidentTransition.Open)
         {
-            await CreateIncidentAsync(connection, transaction, signals, cancellationToken);
+            notification = await CreateIncidentAsync(connection, transaction, signals, cancellationToken);
         }
         else if (transition == IncidentTransition.Resolve && openIncident is not null)
         {
-            await ResolveIncidentAsync(
+            notification = await ResolveIncidentAsync(
                 connection,
                 transaction,
                 openIncident,
@@ -60,6 +61,7 @@ public sealed class PostgresIncidentRepository(
         }
 
         await transaction.CommitAsync(cancellationToken);
+        return notification;
     }
 
     public async Task<IReadOnlyList<IncidentOverview>> GetIncidentsAsync(
@@ -526,7 +528,7 @@ public sealed class PostgresIncidentRepository(
             : null;
     }
 
-    private async Task CreateIncidentAsync(
+    private async Task<IncidentNotificationEvent> CreateIncidentAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         IReadOnlyList<IncidentSignalData> signals,
@@ -575,9 +577,10 @@ public sealed class PostgresIncidentRepository(
             $"Инцидент создан после {problemSignals.Length} последовательных проблемных измерений.",
             "system",
             cancellationToken);
+        return new IncidentNotificationEvent(incidentId, IncidentNotificationKind.Opened);
     }
 
-    private async Task ResolveIncidentAsync(
+    private async Task<IncidentNotificationEvent> ResolveIncidentAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         OpenIncident incident,
@@ -619,6 +622,7 @@ public sealed class PostgresIncidentRepository(
             $"Нормативные показатели восстановлены после {options.Incidents.ConsecutiveRecoveryMeasurements} последовательных успешных измерений.",
             "system",
             cancellationToken);
+        return new IncidentNotificationEvent(incident.IncidentId, IncidentNotificationKind.Recovered);
     }
 
     private async Task UpdateLatestEvidenceAsync(

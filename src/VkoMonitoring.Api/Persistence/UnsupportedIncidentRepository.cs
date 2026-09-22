@@ -4,8 +4,8 @@ namespace VkoMonitoring.Api.Persistence;
 
 public sealed class UnsupportedIncidentRepository : IIncidentRepository
 {
-    public Task ProcessLatestMeasurementAsync(Guid lineId, CancellationToken cancellationToken) =>
-        Task.CompletedTask;
+    public Task<IncidentNotificationEvent?> ProcessLatestMeasurementAsync(Guid lineId, CancellationToken cancellationToken) =>
+        Task.FromResult<IncidentNotificationEvent?>(null);
 
     public Task<IReadOnlyList<IncidentOverview>> GetIncidentsAsync(
         Guid? schoolId,
