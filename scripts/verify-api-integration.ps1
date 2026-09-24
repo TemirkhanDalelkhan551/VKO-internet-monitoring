@@ -188,6 +188,23 @@ try {
   $users[$u.login]=@{record=$created.data;headers=@{Authorization="Bearer $($signed.data.accessToken)"};token=$signed.data.accessToken}
  }
  $schoolHeaders=$users['school-user'].headers;$providerHeaders=$users['provider-user'].headers
+ $ratingFrom=[DateTimeOffset]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ')
+ $ratingTo=[DateTimeOffset]::UtcNow.AddMinutes(1).ToString('yyyy-MM-ddTHH:mm:ssZ')
+ $ratingPath="/api/ratings?from=$ratingFrom&to=$ratingTo"
+ Check 'ratings_anonymous_denied' ((Req GET $ratingPath).code -eq 401)
+ $adminRating=Req GET $ratingPath $null $admin
+ Check 'ratings_admin_session_allowed' ($adminRating.code -eq 200)
+ $schoolRating=Req GET $ratingPath $null $schoolHeaders
+ Check 'ratings_school_session_allowed' ($schoolRating.code -eq 200)
+ Check 'ratings_school_scope' (@($schoolRating.data.schools).Count -eq 1 -and @($schoolRating.data.schools)[0].schoolId -eq $mainBinding.schoolId -and @($schoolRating.data.lines).Count -eq 2)
+ $districtRating=Req GET $ratingPath $null $users['district-user'].headers
+ Check 'ratings_district_scope' ($districtRating.code -eq 200 -and @($districtRating.data.schools).Count -eq 1 -and @($districtRating.data.schools)[0].schoolId -eq $reg.data.schoolId)
+ $regionalRating=Req GET $ratingPath $null $users['regional-user'].headers
+ Check 'ratings_regional_scope' ($regionalRating.code -eq 200 -and @($regionalRating.data.schools).Count -eq @($adminRating.data.schools).Count -and @($regionalRating.data.lines).Count -eq @($adminRating.data.lines).Count)
+ $providerRating=Req GET $ratingPath $null $providerHeaders
+ Check 'ratings_provider_scope' ($providerRating.code -eq 200 -and @($providerRating.data.schools).Count -eq 1 -and @($providerRating.data.lines).Count -eq 1 -and @($providerRating.data.lines)[0].lineId -eq $backup.data.lineId)
+ $emptyRating=Req GET $ratingPath $null $users['empty-user'].headers
+ Check 'ratings_empty_scope' ($emptyRating.code -eq 200 -and @($emptyRating.data.schools).Count -eq 0 -and @($emptyRating.data.lines).Count -eq 0)
  $list=Req GET '/api/schools' $null $schoolHeaders
  Check 'school_only_own_school' (@($list.data).Count -eq 1 -and @($list.data)[0].schoolId -eq $mainBinding.schoolId)
  Check 'school_sees_both_own_lines' (@($list.data)[0].lines.Count -eq 2)
