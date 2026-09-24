@@ -4,7 +4,7 @@
 
 ## Зафиксированное состояние — 24.09.2026
 
-Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . GitHub `main` сейчас на коммите `eb07c10`. Последняя зафиксированная в прежней документации публикация Render — `f6f36ee`; при текущей проверке сайт и PostgreSQL отвечают, но коммит из панели Render сверить не удалось. Автодеплой отключён. Пять ролей ранее прошли 36 read-only проверок; после публикации нового коммита приёмку нужно повторить.
+Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . Приложение вручную опубликовано на Render из коммита `0c4ff6e` и имеет статус `Live`; readiness API и PostgreSQL подтверждены как `Healthy`. В GitHub `main` добавлено последующее обновление документации. Автодеплой отключён. Пять ролей ранее прошли 36 read-only проверок; после изменения авторизации рейтинга нужно отдельно проверить вход и сам экран под рабочей пользовательской сессией.
 
 Полная сводка с проверками и ограничениями: [PROJECT_SNAPSHOT.md](docs/PROJECT_SNAPSHOT.md). Текущая готовность по полному чек-листу — **93%**: [READINESS_ASSESSMENT.md](docs/READINESS_ASSESSMENT.md). Открытые требования: [PROJECT_CHECKLIST.md](docs/PROJECT_CHECKLIST.md). CI, проверка EXE, тихое обновление, диагностический ZIP, диагностика ресурсов и резервные копии: [OPERATIONS.md](docs/OPERATIONS.md). UX-разбор EXE, веб-панели и пользовательских сценариев: [UX_REVIEW_AND_USER_SCENARIOS.md](docs/UX_REVIEW_AND_USER_SCENARIOS.md). Изменения: [CHANGELOG.md](CHANGELOG.md). Сценарий показа: [DEMO_CHECKLIST.md](docs/DEMO_CHECKLIST.md).
 
