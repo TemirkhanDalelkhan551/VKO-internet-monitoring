@@ -8,3 +8,16 @@ data/
 *.user
 *.suo
 *.log
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.dump
+*.zip

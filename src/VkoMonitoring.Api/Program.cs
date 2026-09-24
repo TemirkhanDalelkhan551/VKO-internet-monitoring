@@ -1039,7 +1039,12 @@ app.MapGet(
     async (DateTimeOffset? from, DateTimeOffset? to, HttpRequest request, TokenValidator tokenValidator,
         RatingService ratings, TimeProvider timeProvider, CancellationToken cancellationToken) =>
     {
-        if (!tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault())) return Results.Unauthorized();
+        var access = MonitoringRequestAccess.From(request.HttpContext);
+        if (access?.User is null &&
+            !tokenValidator.IsAdminAuthorized(request.Headers["X-Admin-Token"].FirstOrDefault()))
+        {
+            return Results.Unauthorized();
+        }
         if (!options.StorageProvider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
             return Results.Problem("Ratings require PostgreSQL storage.", statusCode: StatusCodes.Status501NotImplemented);
         var toUtc = to ?? timeProvider.GetUtcNow().AddMinutes(1);
