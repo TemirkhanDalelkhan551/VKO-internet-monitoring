@@ -309,7 +309,8 @@ public sealed class PostgresMonitoringReadRepository(
                    presence.device_count, presence.active_count, presence.last_seen,
                    latest.event_id, latest.measured_at_utc, latest.download_mbps,
                    latest.upload_mbps, latest.ping_milliseconds, latest.jitter_milliseconds,
-                   latest.packet_loss_percent, latest.connection_status, latest.device_id, l.contract_number, l.contract_date
+                   latest.packet_loss_percent, latest.connection_status, latest.device_id, l.contract_number, l.contract_date,
+                   open_incidents.count
             FROM internet_lines l
             LEFT JOIN LATERAL (
                 SELECT COUNT(*)::int AS device_count,
@@ -326,6 +327,12 @@ public sealed class PostgresMonitoringReadRepository(
                 ORDER BY m.measured_at_utc DESC, m.received_at_utc DESC, m.event_id
                 LIMIT 1
             ) latest ON true
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*)::int AS count
+                FROM incidents i
+                WHERE i.school_id = l.school_id AND i.line_id = l.id
+                  AND i.status NOT IN ('Resolved', 'Closed')
+            ) open_incidents ON true
             WHERE ($2::uuid IS NULL OR l.school_id = $2) AND /* access */
             ORDER BY l.school_id, l.name, l.id;
             """;
@@ -355,7 +362,8 @@ public sealed class PostgresMonitoringReadRepository(
                 ToSnapshot(measurement))
             {
                 ContractNumber = GetNullableString(reader, 20),
-                ContractDate = reader.IsDBNull(21) ? null : reader.GetFieldValue<DateOnly>(21)
+                ContractDate = reader.IsDBNull(21) ? null : reader.GetFieldValue<DateOnly>(21),
+                OpenIncidentCount = reader.GetInt32(22)
             }, now, options));
         }
 

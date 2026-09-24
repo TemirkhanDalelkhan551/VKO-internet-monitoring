@@ -1,5 +1,5 @@
 import { splitLocations, mapColors, parseLocation } from "./map-model.js";
-import { statuses, presenceLabels, metric, timestamp, schoolMeasurementDescription } from "./dashboard-model.js";
+import { statuses, metric, timestamp, schoolMeasurementDescription, agentPresenceDescription, openIncidentDescription } from "./dashboard-model.js";
 
 export function createSchoolMap({ element, openSchool, request, getSession, onUnauthorized, onSaved }) {
   const host = document.getElementById("school-map-panel");
@@ -68,7 +68,8 @@ export function createSchoolMap({ element, openSchool, request, getSession, onUn
       ["Upload", `${metric(school.latestMeasurement?.uploadMbps)} Мбит/с`], ["Ping", `${metric(school.latestMeasurement?.pingMilliseconds)} мс`],
       ["Jitter", `${metric(school.latestMeasurement?.jitterMilliseconds)} мс`], ["Потери", `${metric(school.latestMeasurement?.packetLossPercent)} %`],
       ["Последний замер", timestamp(school.latestMeasurement?.measuredAtUtc)], ["Свежесть", schoolMeasurementDescription(school)],
-      ["Агент", school.primaryLineId ? presenceLabels[school.agentPresence] || "Нет данных" : "Нет данных основной линии"],
+      ["Агент", school.primaryLineId ? agentPresenceDescription(school) : "Нет данных основной линии"],
+      ["Открытые инциденты", openIncidentDescription(school.openIncidentCount || 0)],
       ["Устройства на связи", `${school.activeDeviceCount} / ${school.deviceCount}`]]) {
       const row = element("tr"); row.append(element("th", "", label), element("td", "", value)); table.append(row);
     }

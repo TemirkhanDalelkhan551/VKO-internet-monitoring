@@ -1,4 +1,4 @@
-import { roles, statuses, presenceLabels, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, measurementAge, schoolMeasurementDescription, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
+import { roles, statuses, lineTypes, accessDescription, filterSchools, summarize, freshnessDescription, measurementAge, schoolMeasurementDescription, agentPresenceDescription, openIncidentDescription, dashboardRefreshFailureMessage, isMonitoringServerUnavailable, lineCountLabel, metric, timestamp } from "./dashboard-model.js";
 import { createSchoolPanel } from "./school-panel.js";
 import { createOverviewTools } from "./overview-tools.js";
 import { createSchoolMap } from "./school-map.js";
@@ -20,10 +20,11 @@ function element(tag, className, text) {
   return node;
 }
 
-function message(id, text, info = false) {
+function message(id, text, info = false, variant = "") {
   const node = byId(id);
   node.textContent = text;
   node.classList.toggle("info", info);
+  node.classList.toggle("server-unavailable", variant === "server-unavailable");
   node.hidden = !text;
 }
 
@@ -143,6 +144,7 @@ function openMobileNavigation() {
 
 function statusCell(item) {
   const cell = element("td");
+  cell.append(element("span", "secondary-text", "Качество последнего замера"));
   cell.append(badge(item.status));
   const freshness = item.measurementFreshness || "Missing";
   cell.append(element("span", `freshness ${freshness.toLowerCase()}`, freshnessDescription(item)));
@@ -150,7 +152,9 @@ function statusCell(item) {
   if (freshness === "Stale") cell.append(element("span", "secondary-text", "Последнее качество: " + (statuses[item.qualityStatus] || statuses.Unknown)[0]));
   const primaryUnavailable = "primaryLineId" in item && !item.primaryLineId;
   cell.append(element("span", `presence ${!primaryUnavailable ? (item.agentPresence || "NotSeen").toLowerCase() : "notseen"}`,
-    primaryUnavailable ? "Нет данных основной линии" : presenceLabels[item.agentPresence] || "Связь с агентом неизвестна"));
+    primaryUnavailable ? "Нет данных основной линии" : agentPresenceDescription(item)));
+  cell.append(element("span", `incident-state${item.openIncidentCount ? " has-open-incidents" : ""}`,
+    openIncidentDescription(item.openIncidentCount || 0)));
   return cell;
 }
 
@@ -165,7 +169,9 @@ function lineCard(line) {
   const top = element("div", "line-top");
   const heading = element("div");
   heading.append(element("h3", "line-name", line.name), element("p", "line-type", `${lineTypes[line.lineStatus] || line.lineStatus} · ${line.providerName || "Поставщик не указан"}`));
-  top.append(heading, badge(line.status));
+  const quality = element("div", "line-quality");
+  quality.append(element("span", "secondary-text", "Качество замера"), badge(line.status));
+  top.append(heading, quality);
   const metrics = element("dl", "line-metrics");
   const snapshot = line.latestMeasurement;
   for (const [label, value, unit] of [["Download", snapshot?.downloadMbps, "Мбит/с"], ["Upload", snapshot?.uploadMbps, "Мбит/с"], ["Ping", snapshot?.pingMilliseconds, "мс"], ["Jitter", snapshot?.jitterMilliseconds, "мс"], ["Потери", snapshot?.packetLossPercent, "%"]]) {
@@ -173,7 +179,8 @@ function lineCard(line) {
   }
   const foot = element("div", "line-foot");
   foot.append(element("span", `freshness ${String(line.measurementFreshness || "Missing").toLowerCase()}`, `${freshnessDescription(line)} · последний замер ${measurementAge(snapshot?.measuredAtUtc)}`),
-    element("span", `presence ${(line.agentPresence || "NotSeen").toLowerCase()}`, presenceLabels[line.agentPresence] || "Связь с агентом неизвестна"),
+    element("span", `presence ${(line.agentPresence || "NotSeen").toLowerCase()}`, agentPresenceDescription(line)),
+    element("span", `incident-state${line.openIncidentCount ? " has-open-incidents" : ""}`, openIncidentDescription(line.openIncidentCount || 0)),
     element("span", "", `Устройств на связи: ${line.activeDeviceCount} из ${line.deviceCount}`));
   if (line.measurementFreshness === "Stale") foot.append(element("span", "", "Последнее качество: " + (statuses[line.qualityStatus] || statuses.Unknown)[0]));
   if (line.contractedDownloadMbps !== null || line.contractedUploadMbps !== null) foot.append(element("span", "", `Договор: ↓ ${metric(line.contractedDownloadMbps)} / ↑ ${metric(line.contractedUploadMbps)} Мбит/с`));
@@ -299,9 +306,13 @@ async function refresh() {
   } catch (error) {
     if (epoch !== state.epoch) return;
     if (error.status === 401) { endSession("Сессия завершена или доступ изменён. Войдите заново."); return; }
-    const detail = error.status === 429 ? "Слишком много запросов. Повторите обновление через минуту." : error.status === 403 ? "Нет прав для просмотра данных." : "Не удалось обновить данные. Проверьте соединение и попробуйте снова.";
-    message("dashboard-message", detail + (state.loaded ? ` Показаны данные, загруженные ${timestamp(state.loadedAt)}.` : ""));
-    byId("updated-at").textContent = "Данные не обновлены";
+    const serverUnavailable = isMonitoringServerUnavailable(error);
+    const previousData = state.loaded
+      ? ` Последнее успешное обновление: ${timestamp(state.loadedAt)}. Показанные данные могут устареть.`
+      : " Успешной загрузки данных школ ещё не было.";
+    message("dashboard-message", dashboardRefreshFailureMessage(error) + previousData, false,
+      serverUnavailable ? "server-unavailable" : "");
+    byId("updated-at").textContent = serverUnavailable ? "Проблема сервера мониторинга" : "Данные не обновлены";
     if (!state.loaded) byId("result-count").textContent = "Не удалось загрузить школы";
   } finally {
     if (epoch === state.epoch) {

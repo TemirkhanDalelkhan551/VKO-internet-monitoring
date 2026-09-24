@@ -152,3 +152,8 @@ th{background:#f9fafb;color:#475467;font-size:11px;letter-spacing:.02em;border-c
 }
 @media(min-width:601px) and (max-width:800px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.main{padding-left:20px;padding-right:20px}.mobile-header{margin-left:-20px;margin-right:-20px;padding-left:20px;padding-right:20px}}
 @media(max-width:800px) and (orientation:landscape) and (max-height:520px){.sidebar{padding-top:10px;padding-bottom:10px}.sidebar .nav-label{margin-top:10px}.sidebar-bottom{margin-top:10px}.sidebar-bottom .nav-label,.access-description,.account{display:none!important}}
+.message.server-unavailable{border-color:#fecdca;background:#fef3f2;color:#b42318}
+.line-quality{display:grid;justify-items:end;gap:5px}
+.line-quality .secondary-text{font-size:10px}
+.incident-state{display:block;margin-top:6px;color:#667085;font-size:11px;font-weight:600}
+.incident-state.has-open-incidents{color:#b42318}

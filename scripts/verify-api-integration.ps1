@@ -91,10 +91,15 @@ try {
  $null=Req POST '/api/measurements' (New-TestMeasurement 20 10) $dh
  $incidents=Req GET "/api/incidents?schoolId=$($binding.schoolId)" $null $admin
  Check 'two_failures_open_incident' (@($incidents.data).Count -eq 1 -and @($incidents.data)[0].status -eq 'New')
+ $overview=@((Req GET '/api/schools' $null $admin).data|Where-Object schoolId -eq $binding.schoolId)[0]
+ $incidentLine=@($overview.lines|Where-Object lineId -eq $binding.lineId)[0]
+ Check 'open_incident_visible_in_school_overview' ($overview.openIncidentCount -eq 1 -and $incidentLine.openIncidentCount -eq 1)
  $iid=@($incidents.data)[0].incidentId
  $null=Req POST '/api/measurements' (New-TestMeasurement 30) $dh
  $null=Req POST '/api/measurements' (New-TestMeasurement 40) $dh
  Check 'two_recoveries_resolve' ((Req GET "/api/incidents/$iid" $null $admin).data.incident.status -eq 'Resolved')
+ $recoveredOverview=@((Req GET '/api/schools' $null $admin).data|Where-Object schoolId -eq $binding.schoolId)[0]
+ Check 'resolved_incident_not_counted_as_open' ($recoveredOverview.openIncidentCount -eq 0)
  Check 'close_incident' ((Req PUT "/api/incidents/$iid/status" @{status='Closed';actor='verification';comment='closed'} $admin).code -eq 204)
  $manual=Req POST '/api/incidents' @{schoolId=$binding.schoolId;lineId=$binding.lineId;problemType='ManualTest';title='Test';description='Verification';actor='verification'} $admin
  Check 'manual_incident' ($manual.code -eq 201)

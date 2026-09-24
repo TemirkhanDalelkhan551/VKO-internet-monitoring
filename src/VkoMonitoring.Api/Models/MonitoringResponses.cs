@@ -41,6 +41,8 @@ public sealed record SchoolOverview(
     MeasurementSnapshot? LatestMeasurement)
 {
     public Guid? PrimaryLineId { get; init; }
+    public DateTimeOffset? LastSeenAtUtc { get; init; }
+    public int OpenIncidentCount { get; init; }
     public double? Latitude { get; init; }
     public double? Longitude { get; init; }
     public string? ResponsibleName { get; init; }
@@ -92,6 +94,7 @@ public sealed record LineOverview(
 {
     public string? ContractNumber { get; init; }
     public DateOnly? ContractDate { get; init; }
+    public int OpenIncidentCount { get; init; }
     public MonitoringStatus QualityStatus { get; init; }
     public MeasurementFreshness MeasurementFreshness { get; init; }
     public AgentPresence AgentPresence { get; init; }

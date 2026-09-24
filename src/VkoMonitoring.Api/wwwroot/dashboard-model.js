@@ -34,6 +34,31 @@ export function freshnessDescription(item) {
   return "Актуальный замер";
 }
 
+export function agentPresenceDescription(item, now = Date.now()) {
+  const label = presenceLabels[item.agentPresence] || "Связь с агентом неизвестна";
+  return item.lastSeenAtUtc
+    ? `${label} · последняя связь ${measurementAge(item.lastSeenAtUtc, now)} (${timestamp(item.lastSeenAtUtc)})`
+    : label;
+}
+
+export function openIncidentDescription(count) {
+  if (!Number.isInteger(count) || count <= 0) return "Открытых инцидентов нет";
+  const form = new Intl.PluralRules("ru").select(count);
+  const label = { one: "инцидент", few: "инцидента", many: "инцидентов", other: "инцидента" }[form];
+  return `Открыто ${count} ${label}`;
+}
+
+export function dashboardRefreshFailureMessage(error) {
+  if (error?.status === 429) return "Сервер мониторинга ограничил частоту запросов. Состояние школ не обновлено.";
+  if (error?.status === 403) return "У этой учётной записи нет прав для обновления данных.";
+  if (error?.status && error.status < 500) return "Сервер мониторинга отклонил запрос. Состояние школ не обновлено.";
+  return "Сервер мониторинга недоступен или вернул ошибку. Это не означает, что интернет в школе отключён; состояние линий сейчас не обновлено.";
+}
+
+export function isMonitoringServerUnavailable(error) {
+  return !error?.status || error.status >= 500 || error.name === "AbortError";
+}
+
 export function measurementAge(value, now = Date.now()) {
   const measured = value ? new Date(value).getTime() : NaN;
   if (!Number.isFinite(measured) || !Number.isFinite(now)) return "замеров ещё нет";

@@ -53,6 +53,8 @@ public static class MonitoringOverviewFactory
         return school with
         {
             PrimaryLineId = primary?.LineId,
+            LastSeenAtUtc = primary?.LastSeenAtUtc,
+            OpenIncidentCount = lines.Sum(line => line.OpenIncidentCount),
             ProviderName = primary?.ProviderName,
             ConnectionType = primary?.ConnectionType,
             ContractedDownloadMbps = primary?.ContractedDownloadMbps,

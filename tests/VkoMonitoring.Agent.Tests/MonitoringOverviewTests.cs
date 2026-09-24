@@ -89,6 +89,18 @@ public sealed class MonitoringOverviewTests
         Assert.Equal(MeasurementFreshness.Missing, result.MeasurementFreshness);
     }
 
+    [Fact]
+    public void SchoolOverviewUsesPrimaryHeartbeatAndCountsOpenIncidentsAcrossVisibleLines()
+    {
+        var primary = Line("Primary", 1) with { LastSeenAtUtc = Now.AddMinutes(-5), OpenIncidentCount = 2 };
+        var backup = Line("Backup", 1) with { OpenIncidentCount = 1 };
+
+        var result = MonitoringOverviewFactory.WithLines(School(), [primary, backup]);
+
+        Assert.Equal(primary.LastSeenAtUtc, result.LastSeenAtUtc);
+        Assert.Equal(3, result.OpenIncidentCount);
+    }
+
     private static MeasurementSnapshot Snapshot(int age) => new(50, 50, 20, 1, 0, Now.AddMinutes(-age));
     private static LineOverview Line(string type, int age) => new(Guid.NewGuid(), Guid.NewGuid(), type, type,
         "Provider", "Ethernet", 50, 50, 1, 1, Now, MonitoringStatus.Normal, Snapshot(age));
