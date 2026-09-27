@@ -54,6 +54,17 @@ public sealed class DailyMeasurementScheduleTests
     }
 
     [Fact]
+    public void TryUpdateWindows_UsesEarliestWindowWhenRemoteScheduleIsUnsorted()
+    {
+        var schedule = new DailyMeasurementSchedule(CreateOptions());
+        Assert.True(schedule.TryUpdateWindows(["16:00-17:00", "08:00-09:00", "12:00-13:00"]));
+
+        var result = schedule.GetNextRun(new DateTimeOffset(2026, 9, 15, 7, 30, 0, TimeSpan.FromHours(5)));
+
+        Assert.InRange(result.TimeOfDay, TimeSpan.FromHours(8), TimeSpan.FromHours(9));
+    }
+
+    [Fact]
     public void TryUpdateWindows_PreservesScheduleWhenRemoteValueIsInvalid()
     {
         var schedule = new DailyMeasurementSchedule(CreateOptions());

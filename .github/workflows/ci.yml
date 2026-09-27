@@ -62,3 +62,27 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
+
+  api-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait postgres
+
+      - name: Verify API with PostgreSQL
+        shell: pwsh
+        run: ./scripts/verify-api-integration.ps1
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: docker compose down --volumes

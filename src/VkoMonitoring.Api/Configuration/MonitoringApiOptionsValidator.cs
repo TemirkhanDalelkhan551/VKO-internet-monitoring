@@ -61,6 +61,11 @@ public static class MonitoringApiOptionsValidator
             errors.Add("MaximumMeasurementClockSkewMinutes must be between 0 and 60.");
         }
 
+        if (options.MaximumConcurrentSpeedTests is < 1 or > 100)
+        {
+            errors.Add("MaximumConcurrentSpeedTests must be between 1 and 100.");
+        }
+
         if (options.DeviceActiveWindowMinutes <= 0)
         {
             errors.Add("DeviceActiveWindowMinutes must be greater than zero.");

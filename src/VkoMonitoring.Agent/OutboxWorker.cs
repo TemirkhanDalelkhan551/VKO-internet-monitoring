@@ -33,10 +33,18 @@ public sealed class OutboxWorker(
     {
         try
         {
-            var sentCount = await dispatcher.DispatchAsync(cancellationToken);
-            if (sentCount > 0)
+            var result = await dispatcher.DispatchAsync(cancellationToken);
+            if (result.SentCount > 0)
             {
-                logger.LogInformation("Successfully sent {Count} queued measurements.", sentCount);
+                logger.LogInformation("Successfully sent {Count} queued measurements.", result.SentCount);
+            }
+
+            foreach (var rejected in result.QuarantinedMeasurements)
+            {
+                logger.LogError(
+                    "Measurement {EventId} was permanently rejected by the API with HTTP {StatusCode} and moved to quarantine.",
+                    rejected.EventId,
+                    rejected.ResponseStatusCode);
             }
 
             return true;

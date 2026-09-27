@@ -43,11 +43,11 @@ public sealed class RatingService(
         var metrics = new List<RatingMetric>
         {
             new("Проблемные замеры", problemPercent, "%", 35, 35 * problemPercent / 100),
-            LowerIsBetter("Download", Average(rows.Select(row => row.DownloadMbps)), (double)thresholds.MinimumDownloadMbps, "Мбит/с", 15),
-            LowerIsBetter("Upload", Average(rows.Select(row => row.UploadMbps)), (double)thresholds.MinimumUploadMbps, "Мбит/с", 10),
-            HigherIsBetter("Ping", Average(rows.Select(row => row.PingMilliseconds)), (double)thresholds.MaximumPingMilliseconds, "мс", 10),
-            HigherIsBetter("Jitter", Average(rows.Select(row => row.JitterMilliseconds)), (double)thresholds.MaximumJitterMilliseconds, "мс", 5),
-            HigherIsBetter("Packet Loss", Average(rows.Select(row => row.PacketLossPercent)), (double)thresholds.MaximumPacketLossPercent, "%", 5),
+            MetricWithBelowTargetPenalty("Download", Average(rows.Select(row => row.DownloadMbps)), (double)thresholds.MinimumDownloadMbps, "Мбит/с", 15),
+            MetricWithBelowTargetPenalty("Upload", Average(rows.Select(row => row.UploadMbps)), (double)thresholds.MinimumUploadMbps, "Мбит/с", 10),
+            MetricWithAboveTargetPenalty("Ping", Average(rows.Select(row => row.PingMilliseconds)), (double)thresholds.MaximumPingMilliseconds, "мс", 10),
+            MetricWithAboveTargetPenalty("Jitter", Average(rows.Select(row => row.JitterMilliseconds)), (double)thresholds.MaximumJitterMilliseconds, "мс", 5),
+            MetricWithAboveTargetPenalty("Packet Loss", Average(rows.Select(row => row.PacketLossPercent)), (double)thresholds.MaximumPacketLossPercent, "%", 5),
             new("Свежесть данных", freshness == MeasurementFreshness.Fresh ? 0 : freshness == MeasurementFreshness.Stale ? 1 : 2, "", 10, freshness == MeasurementFreshness.Fresh ? 0 : freshness == MeasurementFreshness.Stale ? 5 : 10),
             new("Инциденты", incidentCount, "шт.", 10, Math.Min(10, incidentCount * 2d))
         };
@@ -73,11 +73,18 @@ public sealed class RatingService(
             .Select(item => item with { Rank = null });
         return ranked.Concat(insufficient).ToArray();
     }
-    private static double? Average(IEnumerable<double?> values) { var numbers = values.OfType<double>().ToArray(); return numbers.Length == 0 ? null : Math.Round(numbers.Average(), 2); }
-    private static RatingMetric LowerIsBetter(string name, double? value, double target, string unit, double weight) =>
+    private static double? Average(IEnumerable<double?> values)
+    {
+        var numbers = values.OfType<double>().ToArray();
+        return numbers.Length == 0 ? null : Math.Round(numbers.Average(), 2);
+    }
+
+    private static RatingMetric MetricWithBelowTargetPenalty(string name, double? value, double target, string unit, double weight) =>
         new(name, value, unit, weight, value is null ? weight : weight * Math.Clamp((target - value.Value) / target, 0, 1));
-    private static RatingMetric HigherIsBetter(string name, double? value, double target, string unit, double weight) =>
+
+    private static RatingMetric MetricWithAboveTargetPenalty(string name, double? value, double target, string unit, double weight) =>
         new(name, value, unit, weight, value is null ? weight : weight * Math.Clamp((value.Value - target) / target, 0, 1));
+
     private static IReadOnlyList<RatingFormulaItem> Formula() =>
     [
         new("Итог", "100 − сумма штрафов; ниже 0 не опускается.", 100),

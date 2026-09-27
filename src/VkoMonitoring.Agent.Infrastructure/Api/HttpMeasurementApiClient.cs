@@ -9,7 +9,9 @@ public sealed class HttpMeasurementApiClient(
     HttpClient httpClient,
     IDeviceTokenProvider tokenProvider) : IMeasurementApiClient
 {
-    public async Task SendAsync(InternetMeasurement measurement, CancellationToken cancellationToken)
+    public async Task<MeasurementDeliveryResult> SendAsync(
+        InternetMeasurement measurement,
+        CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/measurements")
         {
@@ -18,6 +20,19 @@ public sealed class HttpMeasurementApiClient(
         request.Headers.Add("X-Device-Token", tokenProvider.GetToken());
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        if (response.IsSuccessStatusCode)
+        {
+            return MeasurementDeliveryResult.Delivered;
+        }
+
+        if ((int)response.StatusCode is 400 or 413 or 422 && response.Headers.RetryAfter is null)
+        {
+            return MeasurementDeliveryResult.PermanentlyRejected((int)response.StatusCode);
+        }
+
+        throw new HttpRequestException(
+            $"Monitoring API rejected the measurement with HTTP {(int)response.StatusCode}.",
+            inner: null,
+            response.StatusCode);
     }
 }

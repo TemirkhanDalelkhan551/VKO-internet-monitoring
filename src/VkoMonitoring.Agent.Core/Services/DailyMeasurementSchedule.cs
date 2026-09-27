@@ -34,13 +34,19 @@ public sealed class DailyMeasurementSchedule : IMeasurementSchedule
         {
             var date = DateOnly.FromDateTime(now.Date.AddDays(dayOffset));
             var windows = Volatile.Read(ref _windows);
+            DateTimeOffset? nextRun = null;
             for (var index = 0; index < windows.Count; index++)
             {
                 var candidate = CreateRunTime(date, windows[index], index, now.Offset);
-                if (candidate > now)
+                if (candidate > now && (nextRun is null || candidate < nextRun))
                 {
-                    return candidate;
+                    nextRun = candidate;
                 }
+            }
+
+            if (nextRun is not null)
+            {
+                return nextRun.Value;
             }
         }
 

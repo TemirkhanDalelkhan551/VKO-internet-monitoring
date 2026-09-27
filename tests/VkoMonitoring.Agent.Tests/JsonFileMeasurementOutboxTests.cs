@@ -60,6 +60,22 @@ public sealed class JsonFileMeasurementOutboxTests : IDisposable
         Assert.Equal(firstMeasurement.EventId, pending[0].EventId);
     }
 
+    [Fact]
+    public async Task QuarantineAsync_MovesRejectedMeasurementOutOfPendingQueue()
+    {
+        var outbox = new JsonFileMeasurementOutbox(new AgentOptions { DataDirectory = _directory });
+        var measurement = CreateMeasurement();
+        await outbox.EnqueueAsync(measurement, CancellationToken.None);
+
+        await outbox.QuarantineAsync(measurement.EventId, CancellationToken.None);
+
+        Assert.Empty(await outbox.GetPendingAsync(CancellationToken.None));
+        Assert.True(File.Exists(Path.Combine(
+            _directory,
+            "quarantine",
+            $"{measurement.EventId:N}.json")));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

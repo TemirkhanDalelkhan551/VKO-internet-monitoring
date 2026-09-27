@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using VkoMonitoring.Agent.Logging;
 using VkoMonitoring.Agent.Infrastructure.Diagnostics;
 
 namespace VkoMonitoring.Agent.Tests;
@@ -46,11 +48,33 @@ public sealed class RollingTextFileWriterTests : IDisposable
         Assert.Single(Directory.GetFiles(_directory, "agent-*.log"));
     }
 
+    [Fact]
+    public void Logger_DoesNotThrowWhenLogDirectoryIsUnavailable()
+    {
+        File.WriteAllText(_directory, "This file prevents creation of a directory at the same path.");
+        var writer = new RollingTextFileWriter(
+            _directory,
+            maximumFileSizeBytes: 1_000,
+            retentionDays: 14,
+            TimeProvider.System);
+        using var provider = new RollingFileLoggerProvider(writer);
+        var logger = provider.CreateLogger("test");
+
+        var exception = Record.Exception(() => logger.LogInformation("diagnostic message"));
+
+        Assert.Null(exception);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);
+        }
+
+        if (File.Exists(_directory))
+        {
+            File.Delete(_directory);
         }
     }
 }

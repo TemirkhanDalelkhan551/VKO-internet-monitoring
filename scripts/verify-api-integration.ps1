@@ -4,7 +4,29 @@ $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $work=Join-Path $root 'data/integration-tests'
 New-Item -ItemType Directory -Path $work -Force | Out-Null
-if(Get-NetTCPConnection -LocalPort $ApiPort -State Listen -ErrorAction SilentlyContinue){throw "Integration port is already in use."}
+function Assert-PortAvailable {
+ $listener=$null
+ try {
+  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$ApiPort)
+  $listener.Start()
+ } catch {
+  throw "Integration port $ApiPort is already in use."
+ } finally {
+  if($null -ne $listener){$listener.Stop()}
+ }
+}
+function Start-IntegrationApi($stdoutPath,$stderrPath) {
+ $parameters=@{
+  FilePath=(Get-Command dotnet -ErrorAction Stop).Source
+  ArgumentList=@('"'+$apiPath+'"')
+  PassThru=$true
+  RedirectStandardOutput=$stdoutPath
+  RedirectStandardError=$stderrPath
+ }
+ if($IsWindows){$parameters.WindowStyle='Hidden'}
+ return Start-Process @parameters
+}
+Assert-PortAvailable
 $buildArtifacts=Join-Path $root 'artifacts/integration-build'
 dotnet build (Join-Path $root 'src/VkoMonitoring.Api/VkoMonitoring.Api.csproj') --configuration Release --artifacts-path $buildArtifacts
 if($LASTEXITCODE -ne 0){throw 'Integration API build failed.'}
@@ -15,8 +37,9 @@ function Req($method,$path,$body=$null,$headers=@{}) {
  $args=@{Uri="http://localhost:$ApiPort$path";Method=$method;Headers=$headers;SkipHttpErrorCheck=$true;TimeoutSec=15}
  if($null -ne $body){$args.Body=ConvertTo-Json -InputObject $body -Depth 8;$args.ContentType='application/json'}
  $r=Invoke-WebRequest @args
- $data=$null;try{$data=$r.Content|ConvertFrom-Json}catch{}
- return [pscustomobject]@{code=[int]$r.StatusCode;data=$data;content=$r.Content}
+ $content=if($r.Content -is [byte[]]){[Text.Encoding]::UTF8.GetString($r.Content)}else{[string]$r.Content}
+ $data=$null;try{$data=$content|ConvertFrom-Json}catch{}
+ return [pscustomobject]@{code=[int]$r.StatusCode;data=$data;content=$content;headers=$r.Headers}
 }
 $db='vko_verify_'+(Get-Date -Format 'yyyyMMddHHmmss')+'_'+[guid]::NewGuid().ToString('N').Substring(0,8)
 docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d postgres -c "CREATE DATABASE $db;" | Out-Null
@@ -30,9 +53,11 @@ $env:ASPNETCORE_URLS="http://localhost:$ApiPort"
 $env:ASPNETCORE_ENVIRONMENT='Production'
 $api=$null;$agent=$null
 try {
- $api=Start-Process 'C:/Program Files/dotnet/dotnet.exe' -ArgumentList @('"'+$apiPath+'"') -WindowStyle Hidden -PassThru -RedirectStandardOutput "$work/users-test.stdout.log" -RedirectStandardError "$work/users-test.stderr.log"
+ $api=Start-IntegrationApi "$work/users-test.stdout.log" "$work/users-test.stderr.log"
  for($i=0;$i -lt 30;$i++){try{if((Req GET '/health/ready').code -eq 200){break}}catch{};Start-Sleep -Milliseconds 300}
- Check 'readiness' ((Req GET '/health/ready').data.status -eq 'Healthy')
+ $readiness=Req GET '/health/ready'
+ Check 'readiness' ($readiness.data.status -eq 'Healthy')
+ Check 'correlation_id_header' (-not [string]::IsNullOrWhiteSpace([string]$readiness.headers['X-Correlation-ID']))
  Check 'admin_missing_token' ((Req GET '/api/schools').code -eq 401)
  Check 'admin_wrong_token' ((Req GET '/api/schools' $null @{'X-Admin-Token'='invalid'}).code -eq 401)
  $reg=Req POST '/api/devices/register' @{schoolName='Verification school';districtCity='Verification';lineName='Primary';providerName='Test provider';contractedDownloadMbps=50;contractedUploadMbps=50;lineStatus='Primary';deviceName='Test device';deviceIdentifier=[guid]::NewGuid().ToString();room='TEST'} $admin
@@ -82,7 +107,7 @@ try {
  Check 'online_missing_metrics_rejected' ($missing.code -eq 400) "HTTP $($missing.code)"
  $invalid=New-TestMeasurement 2;$invalid.measuredAtUtc=[DateTimeOffset]::UtcNow.AddDays(10).ToString('o')
  $future=Req POST '/api/measurements' $invalid $dh
- Check 'future_timestamp_rejected' ($future.code -eq 400) "HTTP $($future.code)"
+ Check 'future_timestamp_rejected' ($future.code -eq 400 -and $null -ne $future.headers['Retry-After']) "HTTP $($future.code)"
  # Use another line so negative-input probes do not affect incident sequences.
  $reg2=Req POST '/api/devices/register' @{schoolName='Incident test';lineName='Primary';lineStatus='Primary';deviceName='Incident test';deviceIdentifier=[guid]::NewGuid().ToString()} $admin
  $binding=$reg2.data;$dh=@{'X-Device-Token'=$binding.deviceToken}
@@ -168,7 +193,7 @@ try {
  Check 'bootstrap_create_admin' ($firstAdmin.code -eq 201)
  Stop-Process -Id $api.Id
  $env:MonitoringApi__EnableLegacyAdminToken='false'
- $api=Start-Process 'C:/Program Files/dotnet/dotnet.exe' -ArgumentList @('"'+$apiPath+'"') -WindowStyle Hidden -PassThru -RedirectStandardOutput "$work/users-restart.stdout.log" -RedirectStandardError "$work/users-restart.stderr.log"
+ $api=Start-IntegrationApi "$work/users-restart.stdout.log" "$work/users-restart.stderr.log"
  for($i=0;$i -lt 30;$i++){try{if((Req GET '/health/ready').code -eq 200){break}}catch{};Start-Sleep -Milliseconds 300}
  Check 'legacy_admin_disabled' ((Req GET '/api/schools' $null $admin).code -eq 401)
  $login=Req POST '/api/auth/login' @{login='TEST-ADMIN';password=$testPassword}
@@ -302,7 +327,9 @@ try {
  Check 'provider_history_actor_from_session' (@($ownDetails.history|Where-Object actor -eq 'provider-user').Count -eq 2)
  $null=docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d $db -c 'ALTER TABLE audit_events RENAME TO audit_events_unavailable;'
  try {
-  Check 'audit_unavailable_mutation_fails_closed' ((Req PUT "/api/devices/$($backup.data.deviceId)/block-state" @{isBlocked=$true} $admin).code -eq 500)
+  $auditFailure=Req PUT "/api/devices/$($backup.data.deviceId)/block-state" @{isBlocked=$true} $admin
+  Check 'audit_unavailable_mutation_fails_closed' ($auditFailure.code -eq 500)
+  Check 'unexpected_error_has_safe_problem_details' ($auditFailure.data.status -eq 500 -and -not [string]::IsNullOrWhiteSpace([string]$auditFailure.data.traceId)) $auditFailure.content
  } finally {
   $null=docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d $db -c 'ALTER TABLE audit_events_unavailable RENAME TO audit_events;'
  }

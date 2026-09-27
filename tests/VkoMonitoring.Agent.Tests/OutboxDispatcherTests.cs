@@ -13,9 +13,10 @@ public sealed class OutboxDispatcherTests
         var outbox = new InMemoryOutbox(measurement);
         var dispatcher = new OutboxDispatcher(outbox, new SuccessfulApiClient());
 
-        var sentCount = await dispatcher.DispatchAsync(CancellationToken.None);
+        var result = await dispatcher.DispatchAsync(CancellationToken.None);
 
-        Assert.Equal(1, sentCount);
+        Assert.Equal(1, result.SentCount);
+        Assert.Empty(result.QuarantinedMeasurements);
         Assert.Empty(await outbox.GetPendingAsync(CancellationToken.None));
     }
 
@@ -32,6 +33,28 @@ public sealed class OutboxDispatcherTests
         Assert.Single(await outbox.GetPendingAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task DispatchAsync_QuarantinesPermanentRejectionAndContinuesWithNextMeasurement()
+    {
+        var rejected = CreateMeasurement();
+        var delivered = CreateMeasurement();
+        var outbox = new InMemoryOutbox(rejected, delivered);
+        var dispatcher = new OutboxDispatcher(
+            outbox,
+            new QueueApiClient(
+                MeasurementDeliveryResult.PermanentlyRejected(400),
+                MeasurementDeliveryResult.Delivered));
+
+        var result = await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.SentCount);
+        var quarantined = Assert.Single(result.QuarantinedMeasurements);
+        Assert.Equal(rejected.EventId, quarantined.EventId);
+        Assert.Equal(400, quarantined.ResponseStatusCode);
+        Assert.Equal([rejected.EventId], outbox.QuarantinedEventIds);
+        Assert.Empty(await outbox.GetPendingAsync(CancellationToken.None));
+    }
+
     private static InternetMeasurement CreateMeasurement() => new(
         Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow,
         100, 50, 20, 5, 0, ConnectionStatus.Online, null, "1.0.0");
@@ -39,6 +62,7 @@ public sealed class OutboxDispatcherTests
     private sealed class InMemoryOutbox(params InternetMeasurement[] measurements) : IMeasurementOutbox
     {
         private readonly List<InternetMeasurement> _items = [.. measurements];
+        public List<Guid> QuarantinedEventIds { get; } = [];
 
         public Task EnqueueAsync(InternetMeasurement measurement, CancellationToken cancellationToken)
         {
@@ -54,17 +78,38 @@ public sealed class OutboxDispatcherTests
             _items.RemoveAll(item => item.EventId == eventId);
             return Task.CompletedTask;
         }
+
+        public Task QuarantineAsync(Guid eventId, CancellationToken cancellationToken)
+        {
+            _items.RemoveAll(item => item.EventId == eventId);
+            QuarantinedEventIds.Add(eventId);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class SuccessfulApiClient : IMeasurementApiClient
     {
-        public Task SendAsync(InternetMeasurement measurement, CancellationToken cancellationToken) =>
-            Task.CompletedTask;
+        public Task<MeasurementDeliveryResult> SendAsync(
+            InternetMeasurement measurement,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(MeasurementDeliveryResult.Delivered);
     }
 
     private sealed class FailingApiClient : IMeasurementApiClient
     {
-        public Task SendAsync(InternetMeasurement measurement, CancellationToken cancellationToken) =>
+        public Task<MeasurementDeliveryResult> SendAsync(
+            InternetMeasurement measurement,
+            CancellationToken cancellationToken) =>
             throw new HttpRequestException("API unavailable");
+    }
+
+    private sealed class QueueApiClient(params MeasurementDeliveryResult[] results) : IMeasurementApiClient
+    {
+        private readonly Queue<MeasurementDeliveryResult> _results = new(results);
+
+        public Task<MeasurementDeliveryResult> SendAsync(
+            InternetMeasurement measurement,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(_results.Dequeue());
     }
 }

@@ -4,9 +4,19 @@
 
 ## Зафиксированное состояние — 24.09.2026
 
-Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . Приложение вручную опубликовано на Render из коммита `0c4ff6e` и имеет статус `Live`; readiness API и PostgreSQL подтверждены как `Healthy`. В GitHub `main` добавлено последующее обновление документации. Автодеплой отключён. Пять ролей ранее прошли 36 read-only проверок; после изменения авторизации рейтинга нужно отдельно проверить вход и сам экран под рабочей пользовательской сессией.
+Публичная панель: https://vko-internet-monitoring-api.onrender.com/ . Приложение вручную опубликовано на Render из коммита `ae19197` и имеет статус `Live`; readiness API и PostgreSQL подтверждены как `Healthy`. В GitHub `main` добавлено последующее обновление документации. Автодеплой отключён. Пять ролей ранее прошли 36 read-only проверок; авторизованный экран рейтинга нужно отдельно перепроверять после изменений доступа или публикации.
 
 Полная сводка с проверками и ограничениями: [PROJECT_SNAPSHOT.md](docs/PROJECT_SNAPSHOT.md). Текущая готовность по полному чек-листу — **93%**: [READINESS_ASSESSMENT.md](docs/READINESS_ASSESSMENT.md). Открытые требования: [PROJECT_CHECKLIST.md](docs/PROJECT_CHECKLIST.md). CI, проверка EXE, тихое обновление, диагностический ZIP, диагностика ресурсов и резервные копии: [OPERATIONS.md](docs/OPERATIONS.md). UX-разбор EXE, веб-панели и пользовательских сценариев: [UX_REVIEW_AND_USER_SCENARIOS.md](docs/UX_REVIEW_AND_USER_SCENARIOS.md). Изменения: [CHANGELOG.md](CHANGELOG.md). Сценарий показа: [DEMO_CHECKLIST.md](docs/DEMO_CHECKLIST.md).
+
+## Техническая документация
+
+Полный каталог находится в [docs/](docs/). Основные документы для сопровождения:
+
+- [обзор архитектуры](docs/architecture/overview.md) и [потоки данных](docs/architecture/data-flow.md);
+- [модель безопасности](docs/security/security-model.md);
+- [стратегия тестирования](docs/testing/testing-strategy.md);
+- [технический долг](docs/technical-debt.md);
+- [реестр архитектурных решений](docs/decisions/README.md) и [шаблон ADR](docs/decisions/ADR-TEMPLATE.md).
 
 Для подключения другого компьютера нужен один файл `VkoInternetMonitoringAgent-Setup-1.5.0-win-x64.exe`. Школу и линию создаёт администратор в панели; там же выдаётся одноразовый код. На другом ПК установщик запускается с правами администратора: рабочий адрес API уже заполнен, мастер сначала без расходования кода проверяет сервер и показывает школу/линию, затем активирует компьютер после подтверждения. .NET Runtime отдельно не требуется. Совместимый API опубликован на Render. Установка и активация версии 1.1.0 на втором физическом компьютере подтверждены 19.09.2026. Инструкция: [WEB_ACTIVATION.md](docs/WEB_ACTIVATION.md).
 

@@ -24,23 +24,42 @@ public sealed class JsonFileMeasurementRepository : IMeasurementRepository
         CancellationToken cancellationToken)
     {
         var destinationPath = GetPath(measurement.EventId);
+        if (File.Exists(destinationPath))
+        {
+            return false;
+        }
+
+        var temporaryPath = Path.Combine(
+            _storageDirectory,
+            $"{measurement.EventId:N}.{Guid.NewGuid():N}.tmp");
 
         try
         {
-            await using var stream = new FileStream(
-                destinationPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                4096,
-                FileOptions.Asynchronous | FileOptions.WriteThrough);
-            await JsonSerializer.SerializeAsync(stream, measurement, SerializerOptions, cancellationToken);
-            await stream.FlushAsync(cancellationToken);
+            await using (var stream = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             4096,
+                             FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(stream, measurement, SerializerOptions, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(temporaryPath, destinationPath);
             return true;
         }
         catch (IOException) when (File.Exists(destinationPath))
         {
             return false;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
         }
     }
 

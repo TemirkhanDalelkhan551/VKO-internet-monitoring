@@ -36,7 +36,15 @@ public sealed class RollingFileLoggerProvider(RollingTextFileWriter writer) : IL
             var message = formatter(state, exception);
             var eventSuffix = eventId.Id == 0 ? string.Empty : $" [{eventId.Id}]";
             var exceptionSuffix = exception is null ? string.Empty : $"{Environment.NewLine}{exception}";
-            writer.WriteLine($"{timestamp} {logLevel,-11} {categoryName}{eventSuffix}: {message}{exceptionSuffix}");
+            try
+            {
+                writer.WriteLine($"{timestamp} {logLevel,-11} {categoryName}{eventSuffix}: {message}{exceptionSuffix}");
+            }
+            catch (Exception writeException) when (
+                writeException is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Logging must not stop the monitoring service when the log directory is unavailable.
+            }
         }
     }
 }

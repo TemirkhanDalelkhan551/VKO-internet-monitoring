@@ -91,6 +91,23 @@ public sealed class JsonFileMeasurementOutbox : IMeasurementOutbox
         return Task.CompletedTask;
     }
 
+    public async Task QuarantineAsync(Guid eventId, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var sourcePath = GetPath(eventId);
+            if (File.Exists(sourcePath))
+            {
+                Quarantine(sourcePath);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private string GetPath(Guid eventId) => Path.Combine(_outboxDirectory, $"{eventId:N}.json");
 
     private void EnsureCapacity()

@@ -16,6 +16,7 @@ public sealed class MonitoringApiOptions
     public bool EnableLegacyAdminToken { get; init; } = true;
     public int UserSessionLifetimeMinutes { get; init; } = 480;
     public int MaximumMeasurementClockSkewMinutes { get; init; } = 5;
+    public int MaximumConcurrentSpeedTests { get; init; } = 4;
     public int MaximumSpeedTestBytes { get; init; } = 20_000_000;
     public int ReadinessDegradedAfterMilliseconds { get; init; } = 1_000;
 }

@@ -35,6 +35,27 @@ public sealed class ApiComponentsTests : IDisposable
     }
 
     [Fact]
+    public async Task Repository_ConcurrentAdds_CommitOneCompleteFileWithoutTemporaryFiles()
+    {
+        var repository = new JsonFileMeasurementRepository(new MonitoringApiOptions
+        {
+            DataDirectory = _directory
+        });
+        var measurement = CreateMeasurement();
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ =>
+            repository.AddIfNotExistsAsync(measurement, CancellationToken.None)));
+        var recent = await repository.GetRecentAsync(10, CancellationToken.None);
+
+        Assert.Single(results, result => result);
+        Assert.Single(recent);
+        Assert.Equal(measurement, recent[0]);
+        Assert.Empty(Directory.GetFiles(
+            Path.Combine(_directory, "measurements"),
+            "*.tmp"));
+    }
+
+    [Fact]
     public void TokenValidator_RejectsWrongTokenAndAcceptsConfiguredDevice()
     {
         var deviceId = Guid.NewGuid();
@@ -114,6 +135,39 @@ public sealed class ApiComponentsTests : IDisposable
         MonitoringApiOptionsValidator.Validate(
             options,
             "Host=localhost;Database=monitoring;Username=monitoring;Password=test");
+    }
+
+    [Fact]
+    public void OptionsValidator_RejectsInvalidSpeedTestConcurrencyLimit()
+    {
+        var options = new MonitoringApiOptions
+        {
+            AdminToken = "admin-secret",
+            StorageProvider = "PostgreSql",
+            MaximumConcurrentSpeedTests = 0
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MonitoringApiOptionsValidator.Validate(
+                options,
+                "Host=localhost;Database=monitoring;Username=monitoring;Password=test"));
+
+        Assert.Contains("MaximumConcurrentSpeedTests", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SpeedTestConcurrencyGate_ReleasesCapacityWhenLeaseIsDisposed()
+    {
+        var gate = new SpeedTestConcurrencyGate(maximumConcurrency: 1);
+
+        Assert.True(gate.TryAcquire(out var firstLease));
+        Assert.False(gate.TryAcquire(out var rejectedLease));
+        Assert.Null(rejectedLease);
+
+        firstLease!.Dispose();
+
+        Assert.True(gate.TryAcquire(out var nextLease));
+        nextLease!.Dispose();
     }
 
     [Fact]

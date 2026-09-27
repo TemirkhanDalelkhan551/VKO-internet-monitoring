@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
@@ -43,6 +44,7 @@ var postgresConnectionString = PostgresConnectionStringResolver.Resolve(
 MonitoringApiOptionsValidator.Validate(options, postgresConnectionString);
 
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton(new SpeedTestConcurrencyGate(options.MaximumConcurrentSpeedTests));
 builder.Services.AddSingleton(appealDraftOptions);
 builder.Services.AddSingleton(telegramNotificationOptions);
 builder.Services.AddHttpClient<IAppealDraftGenerator, OpenAiAppealDraftGenerator>(client =>
@@ -54,12 +56,17 @@ builder.Services.AddHttpClient("telegram-notifications", client =>
 {
     client.BaseAddress = new Uri("https://api.telegram.org/");
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(telegramNotificationOptions.TimeoutSeconds, 3, 30));
-});
+}).RemoveAllLoggers();
 builder.Services.AddSingleton<TelegramNotificationDispatcher>();
 builder.Services.AddSingleton<ITelegramNotificationDispatcher>(provider => provider.GetRequiredService<TelegramNotificationDispatcher>());
 builder.Services.AddHostedService(provider => provider.GetRequiredService<TelegramNotificationDispatcher>());
 builder.Services.AddScoped<RatingService>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddProblemDetails(problemDetailsOptions =>
+{
+    problemDetailsOptions.CustomizeProblemDetails = context =>
+        context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+});
 builder.Services.AddSingleton<MonitoringAccessContext>();
 builder.Services.AddSingleton<TokenValidator>();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -188,8 +195,10 @@ else
 
 var app = builder.Build();
 app.UseForwardedHeaders();
+app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
+    context.Response.Headers["X-Correlation-ID"] = context.TraceIdentifier;
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
     context.Response.Headers["Content-Security-Policy"] =
@@ -306,12 +315,23 @@ app.MapPut("/api/settings/operations", async (
     try
     {
         if (settings.MeasurementWindows is null || settings.MeasurementWindows.Length is < 1 or > 12 ||
-            settings.MeasurementWindows.Any(window => string.IsNullOrWhiteSpace(window)) ||
-            settings.MeasurementWindows.Select(VkoMonitoring.Agent.Core.Configuration.DailyWindow.Parse).Count() == 0 ||
-            settings.MinimumDownloadMbps <= 0 || settings.MinimumUploadMbps <= 0 ||
+            settings.MeasurementWindows.Any(window => string.IsNullOrWhiteSpace(window)))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["settings"] = ["Specify valid measurement windows and positive quality thresholds."] });
+        }
+
+        foreach (var window in settings.MeasurementWindows)
+        {
+            _ = VkoMonitoring.Agent.Core.Configuration.DailyWindow.Parse(window);
+        }
+
+        if (settings.MinimumDownloadMbps <= 0 || settings.MinimumUploadMbps <= 0 ||
             settings.MaximumPingMilliseconds <= 0 || settings.MaximumJitterMilliseconds <= 0 ||
             settings.MaximumPacketLossPercent is <= 0 or > 100 || settings.MinimumAvailabilityPercent is <= 0 or > 100)
+        {
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["settings"] = ["Specify valid measurement windows and positive quality thresholds."] });
+        }
+
         return Results.Ok(await repository.UpdateAsync(settings, cancellationToken));
     }
     catch (FormatException)
@@ -950,12 +970,20 @@ app.MapPost(
             return Results.Unauthorized();
         }
 
-        var errors = MeasurementValidator.Validate(
-            measurement,
-            timeProvider.GetUtcNow(),
-            TimeSpan.FromMinutes(options.MaximumMeasurementClockSkewMinutes));
+        var nowUtc = timeProvider.GetUtcNow();
+        var maximumClockSkew = TimeSpan.FromMinutes(options.MaximumMeasurementClockSkewMinutes);
+        var errors = MeasurementValidator.Validate(measurement, nowUtc, maximumClockSkew);
         if (errors.Count > 0)
         {
+            if (measurement.MeasuredAtUtc > nowUtc + maximumClockSkew)
+            {
+                var retryAfterSeconds = Math.Max(
+                    1,
+                    (int)Math.Ceiling((measurement.MeasuredAtUtc - nowUtc - maximumClockSkew).TotalSeconds));
+                request.HttpContext.Response.Headers.RetryAfter =
+                    retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            }
+
             return Results.ValidationProblem(errors);
         }
 
@@ -1406,46 +1434,63 @@ app.MapGet(
 
 app.MapGet(
     "/speed/download",
-    async (int? bytes, HttpResponse response, CancellationToken cancellationToken) =>
+    async (int? bytes, HttpResponse response, SpeedTestConcurrencyGate concurrencyGate, CancellationToken cancellationToken) =>
     {
-        var responseBytes = Math.Clamp(bytes ?? 5_000_000, 1_024, options.MaximumSpeedTestBytes);
-        var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
-        RandomNumberGenerator.Fill(buffer);
-        response.ContentType = "application/octet-stream";
-        response.ContentLength = responseBytes;
-
-        var remaining = responseBytes;
-        while (remaining > 0)
+        if (!concurrencyGate.TryAcquire(out var lease))
         {
-            var count = Math.Min(buffer.Length, remaining);
-            await response.Body.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
-            remaining -= count;
+            response.StatusCode = StatusCodes.Status429TooManyRequests;
+            return;
+        }
+
+        using (lease)
+        {
+            var responseBytes = Math.Clamp(bytes ?? 5_000_000, 1_024, options.MaximumSpeedTestBytes);
+            var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
+            RandomNumberGenerator.Fill(buffer);
+            response.ContentType = "application/octet-stream";
+            response.ContentLength = responseBytes;
+
+            var remaining = responseBytes;
+            while (remaining > 0)
+            {
+                var count = Math.Min(buffer.Length, remaining);
+                await response.Body.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                remaining -= count;
+            }
         }
     })
     .RequireRateLimiting("speed-test");
 
 app.MapPost(
     "/speed/upload",
-    async (HttpRequest request, CancellationToken cancellationToken) =>
+    async (HttpRequest request, SpeedTestConcurrencyGate concurrencyGate, CancellationToken cancellationToken) =>
     {
-        if (request.ContentLength > options.MaximumSpeedTestBytes)
+        if (!concurrencyGate.TryAcquire(out var lease))
         {
-            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            return Results.StatusCode(StatusCodes.Status429TooManyRequests);
         }
 
-        var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
-        var totalBytes = 0L;
-        int bytesRead;
-        while ((bytesRead = await request.Body.ReadAsync(buffer, cancellationToken)) > 0)
+        using (lease)
         {
-            totalBytes += bytesRead;
-            if (totalBytes > options.MaximumSpeedTestBytes)
+            if (request.ContentLength > options.MaximumSpeedTestBytes)
             {
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
             }
-        }
 
-        return Results.NoContent();
+            var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
+            var totalBytes = 0L;
+            int bytesRead;
+            while ((bytesRead = await request.Body.ReadAsync(buffer, cancellationToken)) > 0)
+            {
+                totalBytes += bytesRead;
+                if (totalBytes > options.MaximumSpeedTestBytes)
+                {
+                    return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                }
+            }
+
+            return Results.NoContent();
+        }
     })
     .RequireRateLimiting("speed-test");
 

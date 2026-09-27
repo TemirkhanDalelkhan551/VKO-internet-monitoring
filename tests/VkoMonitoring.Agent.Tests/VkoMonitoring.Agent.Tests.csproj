@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\VkoMonitoring.Agent\VkoMonitoring.Agent.csproj" />
     <ProjectReference Include="..\..\src\VkoMonitoring.Agent.Core\VkoMonitoring.Agent.Core.csproj" />
     <ProjectReference Include="..\..\src\VkoMonitoring.Agent.Infrastructure\VkoMonitoring.Agent.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\VkoMonitoring.Agent.Setup\VkoMonitoring.Agent.Setup.csproj" />
