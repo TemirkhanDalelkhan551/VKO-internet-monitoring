@@ -40,7 +40,7 @@ $apiPath=Join-Path $buildArtifacts 'bin/VkoMonitoring.Api/release/VkoMonitoring.
 $results=[Collections.Generic.List[object]]::new()
 function Check($name,$ok,$detail='') { $results.Add([pscustomobject]@{name=$name;passed=[bool]$ok;detail=$detail}); Write-Output "$name : $ok $detail" }
 function Req($method,$path,$body=$null,$headers=@{}) {
- $args=@{Uri="http://localhost:$ApiPort$path";Method=$method;Headers=$headers;SkipHttpErrorCheck=$true;TimeoutSec=15}
+ $args=@{Uri="http://127.0.0.1:$ApiPort$path";Method=$method;Headers=$headers;SkipHttpErrorCheck=$true;TimeoutSec=15}
  if($null -ne $body){$args.Body=ConvertTo-Json -InputObject $body -Depth 8;$args.ContentType='application/json'}
  $r=Invoke-WebRequest @args
  $content=if($r.Content -is [byte[]]){[Text.Encoding]::UTF8.GetString($r.Content)}else{[string]$r.Content}
@@ -65,7 +65,7 @@ $env:MonitoringApi__AdminToken=[Convert]::ToBase64String([Security.Cryptography.
 $admin=@{'X-Admin-Token'=$env:MonitoringApi__AdminToken}
 $env:ConnectionStrings__MonitoringDatabase="Host=localhost;Port=55432;Database=$db;Username=vko_monitoring;Password=vko_dev_password"
 if($PsqlPath){$env:ConnectionStrings__MonitoringDatabase="Host=$PostgresHost;Port=$PostgresPort;Database=$db;Username=$PostgresUser;Password='$($env:PGPASSWORD.Replace("'","''"))'"}
-$env:ASPNETCORE_URLS="http://localhost:$ApiPort"
+$env:ASPNETCORE_URLS="http://127.0.0.1:$ApiPort"
 $env:ASPNETCORE_ENVIRONMENT='Production'
 $api=$null;$agent=$null
 try {
