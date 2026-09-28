@@ -1,5 +1,6 @@
 using VkoMonitoring.Api.Configuration;
 using VkoMonitoring.Api.Services;
+using VkoMonitoring.Agent.Core.Domain;
 
 namespace VkoMonitoring.Agent.Tests;
 
@@ -99,6 +100,51 @@ public sealed class IncidentDetectionPolicyTests
         Assert.Equal(
             IncidentTransition.Resolve,
             IncidentDetectionPolicy.DetermineTransition(twoHealthy, true, options));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MeasurementServerFailure_DoesNotOpenOrResolveIncident(bool hasOpenIncident)
+    {
+        var signals = new[]
+        {
+            new IncidentSignal(Guid.NewGuid(), Now, !hasOpenIncident, MeasurementFailureKind.MeasurementServerUnavailable),
+            CreateSignal(-10, !hasOpenIncident),
+            CreateSignal(-20, !hasOpenIncident)
+        };
+
+        Assert.Equal(IncidentTransition.None,
+            IncidentDetectionPolicy.DetermineTransition(signals, hasOpenIncident, new IncidentDetectionOptions()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MeasurementServerFailure_BreaksEvidenceSequence(bool hasOpenIncident)
+    {
+        var signals = new[]
+        {
+            CreateSignal(0, !hasOpenIncident),
+            new IncidentSignal(Guid.NewGuid(), Now.AddMinutes(-10), !hasOpenIncident, MeasurementFailureKind.MeasurementServerUnavailable),
+            CreateSignal(-30, !hasOpenIncident)
+        };
+
+        Assert.Equal(IncidentTransition.None,
+            IncidentDetectionPolicy.DetermineTransition(signals, hasOpenIncident,
+                new IncidentDetectionOptions { MinimumViolationMinutes = 15 }));
+    }
+
+    [Fact]
+    public void InternetUnavailable_RemainsEvidenceOfLineProblem()
+    {
+        var signals = new[]
+        {
+            new IncidentSignal(Guid.NewGuid(), Now, true, MeasurementFailureKind.InternetUnavailable),
+            new IncidentSignal(Guid.NewGuid(), Now.AddMinutes(-10), true, MeasurementFailureKind.InternetUnavailable)
+        };
+        Assert.Equal(IncidentTransition.Open,
+            IncidentDetectionPolicy.DetermineTransition(signals, false, new IncidentDetectionOptions()));
     }
 
     private static IncidentSignal CreateSignal(int minutes, bool isProblem) =>

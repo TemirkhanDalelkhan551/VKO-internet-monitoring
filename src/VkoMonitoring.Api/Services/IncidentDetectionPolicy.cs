@@ -1,4 +1,5 @@
 using VkoMonitoring.Api.Configuration;
+using VkoMonitoring.Agent.Core.Domain;
 
 namespace VkoMonitoring.Api.Services;
 
@@ -12,7 +13,11 @@ public enum IncidentTransition
 public sealed record IncidentSignal(
     Guid EventId,
     DateTimeOffset MeasuredAtUtc,
-    bool IsProblem);
+    bool IsProblem,
+    MeasurementFailureKind FailureKind = MeasurementFailureKind.None)
+{
+    public bool IsLineEvidence => FailureKind != MeasurementFailureKind.MeasurementServerUnavailable;
+}
 
 public static class IncidentDetectionPolicy
 {
@@ -31,13 +36,13 @@ public static class IncidentDetectionPolicy
 
         if (hasOpenIncident)
         {
-            var recoveryCount = newestFirst.TakeWhile(signal => !signal.IsProblem).Count();
+            var recoveryCount = newestFirst.TakeWhile(signal => signal.IsLineEvidence && !signal.IsProblem).Count();
             return recoveryCount >= options.ConsecutiveRecoveryMeasurements
                 ? IncidentTransition.Resolve
                 : IncidentTransition.None;
         }
 
-        var problemSignals = newestFirst.TakeWhile(signal => signal.IsProblem).ToArray();
+        var problemSignals = newestFirst.TakeWhile(signal => signal.IsLineEvidence && signal.IsProblem).ToArray();
         if (problemSignals.Length == 0)
         {
             return IncidentTransition.None;

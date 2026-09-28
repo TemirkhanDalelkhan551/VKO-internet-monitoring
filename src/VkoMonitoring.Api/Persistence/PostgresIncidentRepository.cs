@@ -24,7 +24,7 @@ public sealed class PostgresIncidentRepository(
         await AcquireLineLockAsync(connection, transaction, lineId, cancellationToken);
 
         var signals = await GetSignalsAsync(connection, transaction, lineId, cancellationToken);
-        if (signals.Count == 0)
+        if (signals.Count == 0 || !signals[0].Signal.IsLineEvidence)
         {
             await transaction.CommitAsync(cancellationToken);
             return null;
@@ -442,7 +442,7 @@ public sealed class PostgresIncidentRepository(
                    download_mbps, upload_mbps, ping_milliseconds, jitter_milliseconds,
                    packet_loss_percent, threshold_download_mbps, threshold_upload_mbps,
                    threshold_ping_milliseconds, threshold_jitter_milliseconds,
-                   threshold_packet_loss_percent
+                   threshold_packet_loss_percent, failure_kind
             FROM measurements
             WHERE line_id = $1
             ORDER BY measured_at_utc DESC, received_at_utc DESC
@@ -473,7 +473,8 @@ public sealed class PostgresIncidentRepository(
                 Convert.ToDouble(reader.GetDecimal(11)),
                 Convert.ToDouble(reader.GetDecimal(12)),
                 Convert.ToDouble(reader.GetDecimal(13)),
-                Convert.ToDouble(reader.GetDecimal(14))));
+                Convert.ToDouble(reader.GetDecimal(14)),
+                Enum.Parse<MeasurementFailureKind>(reader.GetString(15))));
         }
 
         return signals;
@@ -541,7 +542,7 @@ public sealed class PostgresIncidentRepository(
             VALUES ($1, $2, $3, 'Automatic', $4, 'New', $5, $6, $7, $8, $9);
             """;
 
-        var problemSignals = signals.TakeWhile(signal => signal.Signal.IsProblem).ToArray();
+        var problemSignals = signals.TakeWhile(signal => signal.Signal.IsLineEvidence && signal.Signal.IsProblem).ToArray();
         var latest = problemSignals[0];
         var (problemType, title, description) = DescribeProblem(latest);
         var incidentId = Guid.NewGuid();
@@ -800,9 +801,10 @@ public sealed class PostgresIncidentRepository(
         double MinimumUploadMbps,
         double MaximumPingMilliseconds,
         double MaximumJitterMilliseconds,
-        double MaximumPacketLossPercent)
+        double MaximumPacketLossPercent,
+        MeasurementFailureKind FailureKind)
     {
-        public IncidentSignal Signal => new(EventId, MeasuredAtUtc, IsProblem);
+        public IncidentSignal Signal => new(EventId, MeasuredAtUtc, IsProblem, FailureKind);
 
         private bool IsProblem =>
             ConnectionStatus != VkoMonitoring.Agent.Core.Domain.ConnectionStatus.Online ||

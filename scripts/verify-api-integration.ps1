@@ -1,5 +1,11 @@
 [CmdletBinding()]
-param([int]$ApiPort=5084)
+param(
+ [int]$ApiPort=5084,
+ [string]$PsqlPath='',
+ [ValidateSet('127.0.0.1','localhost')][string]$PostgresHost='127.0.0.1',
+ [int]$PostgresPort=55432,
+ [ValidatePattern('^[a-zA-Z_][a-zA-Z0-9_]*$')][string]$PostgresUser='vko_monitoring'
+)
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $work=Join-Path $root 'data/integration-tests'
@@ -41,14 +47,24 @@ function Req($method,$path,$body=$null,$headers=@{}) {
  $data=$null;try{$data=$content|ConvertFrom-Json}catch{}
  return [pscustomobject]@{code=[int]$r.StatusCode;data=$data;content=$content;headers=$r.Headers}
 }
+function Invoke-TestSql([string]$database,[string]$sql) {
+ if($PsqlPath){
+  & $PsqlPath -w -h $PostgresHost -p $PostgresPort -U $PostgresUser -d $database -v ON_ERROR_STOP=1 -c $sql
+ } else {
+  docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d $database -v ON_ERROR_STOP=1 -c $sql
+ }
+ if($LASTEXITCODE -ne 0){throw 'Test SQL failed'}
+}
+if($PsqlPath -and !$env:PGPASSWORD){throw 'Set PGPASSWORD for the local test PostgreSQL instance.'}
 $db='vko_verify_'+(Get-Date -Format 'yyyyMMddHHmmss')+'_'+[guid]::NewGuid().ToString('N').Substring(0,8)
-docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d postgres -c "CREATE DATABASE $db;" | Out-Null
+Invoke-TestSql postgres "CREATE DATABASE $db;" | Out-Null
 if($LASTEXITCODE -ne 0){throw 'Test database creation failed'}
 $env:MonitoringApi__EnableLegacyAdminToken='true'
 $env:MonitoringApi__StorageProvider='PostgreSql'
 $env:MonitoringApi__AdminToken=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 $admin=@{'X-Admin-Token'=$env:MonitoringApi__AdminToken}
 $env:ConnectionStrings__MonitoringDatabase="Host=localhost;Port=55432;Database=$db;Username=vko_monitoring;Password=vko_dev_password"
+if($PsqlPath){$env:ConnectionStrings__MonitoringDatabase="Host=$PostgresHost;Port=$PostgresPort;Database=$db;Username=$PostgresUser;Password='$($env:PGPASSWORD.Replace("'","''"))'"}
 $env:ASPNETCORE_URLS="http://localhost:$ApiPort"
 $env:ASPNETCORE_ENVIRONMENT='Production'
 $api=$null;$agent=$null
@@ -295,7 +311,7 @@ try {
  $lockHeaders=@{'CF-Connecting-IP'='198.51.100.203'}
  for($i=0;$i -lt 5;$i++){$null=Req POST '/api/auth/login' @{login='empty-user';password='wrong-password'} $lockHeaders}
  Check 'account_lockout_after_five_failures' ((Req POST '/api/auth/login' @{login='empty-user';password=$testPassword} $lockHeaders).code -eq 401)
- $null=docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d $db -c "UPDATE user_sessions SET expires_at_utc=now()-interval '1 minute' WHERE user_id='$($users['regional-user'].record.userId)';"
+ $null=Invoke-TestSql $db "UPDATE user_sessions SET expires_at_utc=now()-interval '1 minute' WHERE user_id='$($users['regional-user'].record.userId)';"
  Check 'expired_session_denied' ((Req GET '/api/auth/me' $null $users['regional-user'].headers).code -eq 401)
  $audit=Req GET '/api/audit?limit=1000' $null $admin
  Check 'audit_contains_server_actor' (@($audit.data|Where-Object {$_.actor -eq 'school-user' -and $_.action -eq 'POST' -and $_.path -eq '/api/incidents' -and $_.statusCode -eq 201}).Count -eq 1)
@@ -325,18 +341,63 @@ try {
  Check 'provider_can_update_own_incident' ((Req PUT "/api/incidents/$($ownProvider.data.incidentId)/status" @{status='SentToProvider';actor='forged'} $providerHeaders).code -eq 204)
  $ownDetails=(Req GET "/api/incidents/$($ownProvider.data.incidentId)" $null $admin).data
  Check 'provider_history_actor_from_session' (@($ownDetails.history|Where-Object actor -eq 'provider-user').Count -eq 2)
- $null=docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d $db -c 'ALTER TABLE audit_events RENAME TO audit_events_unavailable;'
+ $null=Invoke-TestSql $db 'ALTER TABLE audit_events RENAME TO audit_events_unavailable;'
  try {
   $auditFailure=Req PUT "/api/devices/$($backup.data.deviceId)/block-state" @{isBlocked=$true} $admin
   Check 'audit_unavailable_mutation_fails_closed' ($auditFailure.code -eq 500)
   Check 'unexpected_error_has_safe_problem_details' ($auditFailure.data.status -eq 500 -and -not [string]::IsNullOrWhiteSpace([string]$auditFailure.data.traceId)) $auditFailure.content
  } finally {
-  $null=docker exec vko-monitoring-postgres-1 psql -U vko_monitoring -d $db -c 'ALTER TABLE audit_events_unavailable RENAME TO audit_events;'
+  $null=Invoke-TestSql $db 'ALTER TABLE audit_events_unavailable RENAME TO audit_events;'
  }
  $deviceAfterAuditFailure=@((Req GET "/api/schools/$($backup.data.schoolId)/devices" $null $admin).data|Where-Object deviceId -eq $backup.data.deviceId)[0]
  Check 'failed_audit_prevents_device_change' (-not $deviceAfterAuditFailure.isBlocked)
  $audit=Req GET '/api/audit?limit=1000' $null $admin
  Check 'audit_records_rate_limit' (@($audit.data|Where-Object {$_.action -eq 'RateLimit' -and $_.statusCode -eq 429}).Count -gt 0)
+ # Infrastructure failures must neither create nor resolve a school incident.
+ $infra=Req POST '/api/devices/register' @{schoolName='Infrastructure isolation';lineName='Primary';lineStatus='Primary';deviceName='Infrastructure test';deviceIdentifier=[guid]::NewGuid().ToString()} $admin
+ $binding=$infra.data;$dh=@{'X-Device-Token'=$binding.deviceToken}
+ function Send-InfrastructureFailure([int]$offset) {
+  $payload=New-TestMeasurement $offset
+  $payload.connectionStatus='Degraded';$payload.failureKind='MeasurementServerUnavailable'
+  $payload.downloadMbps=$null;$payload.uploadMbps=$null
+  Check "infrastructure_measurement_$offset" ((Req POST '/api/measurements' $payload $dh).code -eq 201)
+ }
+ Send-InfrastructureFailure 1
+ Send-InfrastructureFailure 2
+ Check 'infrastructure_failures_no_incident' (@((Req GET "/api/incidents?schoolId=$($binding.schoolId)" $null $admin).data).Count -eq 0)
+ $null=Req POST '/api/measurements' (New-TestMeasurement 3 5) $dh
+ Send-InfrastructureFailure 4
+ $null=Req POST '/api/measurements' (New-TestMeasurement 5 5) $dh
+ Check 'infrastructure_breaks_problem_sequence' (@((Req GET "/api/incidents?schoolId=$($binding.schoolId)" $null $admin).data).Count -eq 0)
+ $null=Req POST '/api/measurements' (New-TestMeasurement 6 5) $dh
+ $infraIncident=@((Req GET "/api/incidents?schoolId=$($binding.schoolId)" $null $admin).data)[0]
+ Check 'real_problems_still_open_incident' ($infraIncident.status -eq 'New')
+ $evidenceBefore=(Req GET "/api/incidents/$($infraIncident.incidentId)" $null $admin).content
+ Send-InfrastructureFailure 7
+ Check 'infrastructure_does_not_replace_evidence' ((Req GET "/api/incidents/$($infraIncident.incidentId)" $null $admin).content -eq $evidenceBefore)
+ $null=Req POST '/api/measurements' (New-TestMeasurement 8) $dh
+ Send-InfrastructureFailure 9
+ $null=Req POST '/api/measurements' (New-TestMeasurement 10) $dh
+ Check 'infrastructure_breaks_recovery_sequence' ((Req GET "/api/incidents/$($infraIncident.incidentId)" $null $admin).data.incident.status -eq 'New')
+ $null=Req POST '/api/measurements' (New-TestMeasurement 11) $dh
+ Check 'real_recovery_still_resolves' ((Req GET "/api/incidents/$($infraIncident.incidentId)" $null $admin).data.incident.status -eq 'Resolved')
+
+ # An old recovery code must not undo an administrator's block or binding change.
+ $activationDevice=$recovered.data
+ $null=Req PUT "/api/devices/$($activationDevice.deviceId)/block-state" @{isBlocked=$true} $admin
+ Check 'blocked_recovery_preview_denied' ((Req POST '/api/devices/activation-preview' @{activationCode=$ab.activationCode;deviceIdentifier=$ab.deviceIdentifier}).code -eq 401)
+ Check 'blocked_old_code_recovery_denied' ((Req POST '/api/devices/activate' $ab).code -eq 401)
+ $newCode=Req POST '/api/activation-codes' @{schoolId=$activationDevice.schoolId;lineId=$activationDevice.lineId;lifetimeMinutes=5} $admin
+ $newActivation=$ab.Clone();$newActivation.activationCode=$newCode.data.activationCode
+ $preview=Req POST '/api/devices/activation-preview' @{activationCode=$newActivation.activationCode;deviceIdentifier=$ab.deviceIdentifier}
+ Check 'new_code_previews_reconfiguration' ($preview.code -eq 200 -and $preview.data.isReconfiguration)
+ $reconfigured=Req POST '/api/devices/activate' $newActivation
+ Check 'new_code_restores_same_device' ($reconfigured.code -eq 201 -and $reconfigured.data.reconfigured -and $reconfigured.data.deviceId -eq $activationDevice.deviceId)
+ $sameIdentifier=@((Req GET "/api/schools/$($activationDevice.schoolId)/devices" $null $admin).data | Where-Object deviceId -eq $activationDevice.deviceId)
+ Check 'reconfiguration_unblocks_device' ($sameIdentifier.Count -eq 1 -and -not $sameIdentifier[0].isBlocked)
+ $null=Req PUT "/api/devices/$($activationDevice.deviceId)/binding" @{schoolId=$infra.data.schoolId;lineId=$infra.data.lineId;reason='Recovery must not undo reassignment'} $admin
+ Check 'rebound_recovery_preview_denied' ((Req POST '/api/devices/activation-preview' @{activationCode=$newActivation.activationCode;deviceIdentifier=$ab.deviceIdentifier}).code -eq 401)
+ Check 'rebound_old_code_recovery_denied' ((Req POST '/api/devices/activate' $newActivation).code -eq 401)
 } catch { Check 'harness_exception' $false $_.Exception.Message }
 finally {
  if($agent -and -not $agent.HasExited){Stop-Process -Id $agent.Id}

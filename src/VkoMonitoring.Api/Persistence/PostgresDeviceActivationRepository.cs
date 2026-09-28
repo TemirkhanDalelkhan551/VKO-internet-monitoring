@@ -104,7 +104,9 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
                     OR
                     (c.used_at_utc >= now() - interval '24 hours'
                      AND d.device_identifier = $2
-                     AND d.lifecycle_status = 'Active')
+                     AND d.lifecycle_status = 'Active'
+                     AND NOT d.is_blocked
+                     AND d.school_id = c.school_id AND d.line_id = c.line_id)
                   );
             """;
 
@@ -155,9 +157,14 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
         var reconfigured = existingDevice is not null;
         if (recovered)
         {
-            await RecoverDeviceAsync(
+            var restored = await RecoverDeviceAsync(
                 connection, transaction, request, effectiveDeviceId,
+                codeBinding.Value.SchoolId, codeBinding.Value.LineId,
                 deviceTokenHash, cancellationToken);
+            if (!restored)
+            {
+                return null;
+            }
         }
         else if (existingDevice is not null)
         {
@@ -208,7 +215,9 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
                     OR
                     (c.used_at_utc >= now() - interval '24 hours'
                      AND d.device_identifier = $2
-                     AND d.lifecycle_status = 'Active')
+                     AND d.lifecycle_status = 'Active'
+                     AND NOT d.is_blocked
+                     AND d.school_id = c.school_id AND d.line_id = c.line_id)
                   )
             FOR UPDATE OF c;
             """;
@@ -229,11 +238,13 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             reader.IsDBNull(3) ? null : reader.GetGuid(3));
     }
 
-    private static async Task RecoverDeviceAsync(
+    private static async Task<bool> RecoverDeviceAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         DeviceActivationRequest request,
         Guid deviceId,
+        Guid schoolId,
+        Guid lineId,
         byte[] deviceTokenHash,
         CancellationToken cancellationToken)
     {
@@ -241,7 +252,8 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
             UPDATE devices
             SET name = $2, room = $3, connection_type = $4,
                 token_hash = $5, is_blocked = false
-            WHERE id = $1 AND lifecycle_status = 'Active';
+            WHERE id = $1 AND lifecycle_status = 'Active'
+              AND NOT is_blocked AND school_id = $6 AND line_id = $7;
             """;
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -251,10 +263,9 @@ public sealed class PostgresDeviceActivationRepository(NpgsqlDataSource dataSour
         AddNullableText(command, request.Room);
         AddNullableText(command, request.ConnectionType);
         command.Parameters.AddWithValue(deviceTokenHash);
-        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
-        {
-            throw new InvalidOperationException("The device cannot be recovered.");
-        }
+        command.Parameters.AddWithValue(schoolId);
+        command.Parameters.AddWithValue(lineId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     private static async Task<(Guid DeviceId, Guid SchoolId, Guid LineId)?> LockActiveDeviceByIdentifierAsync(
